@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   MANUAL_CHECKS,
@@ -8,6 +9,7 @@ import {
   TokenBucket,
   TwentyClient,
   type CheckResult,
+  escapeTableCell,
 } from '../src/index.js';
 import { FAKE_MODEL, FakeTwenty, type FakeQuirks } from '../src/testing/fakeTwenty.js';
 
@@ -205,5 +207,66 @@ describe('M0 harness', () => {
     expect(md).toMatch(/\| PASS \| `health`/);
     expect(md).toMatch(/\| MANUAL \| `care-permissions`/);
     expect(md.split('\n').filter((l) => l.startsWith('|')).length).toBe(results.length + 2);
+  });
+});
+
+describe('escapeTableCell (CodeQL alert: incomplete string escaping)', () => {
+  it.each([
+    ['plain text', 'plain text'],
+    ['a|b', 'a\\|b'],
+    ['a\\b', 'a\\\\b'],
+    // The case CodeQL flagged: a backslash before a pipe. Escaping only the pipe would give `\\|`, where the
+    // first backslash escapes the second and the pipe is live again.
+    ['a\\|b', 'a\\\\\\|b'],
+    ['a\\\\|b', 'a\\\\\\\\\\|b'],
+    ['line one\nline two', 'line one line two'],
+    ['line one\r\nline two', 'line one line two'],
+    ['line one\rline two', 'line one line two'],
+  ])('%j', (input, expected) => {
+    expect(escapeTableCell(input)).toBe(expected);
+  });
+
+  /** What a markdown renderer does to a cell: `\\` and `\|` lose their backslash. */
+  const unescape = (cell: string) => cell.replace(/\\([\\|])/g, '$1');
+
+  it('property: every pipe is escaped, no newline survives, and unescaping restores the original text', () => {
+    fc.assert(
+      fc.property(
+        fc.string({ unit: fc.constantFrom('a', ' ', '|', '\\', '\n', '\r', '`', 'x') }),
+        (text) => {
+          const cell = escapeTableCell(text);
+          expect(cell).not.toMatch(/[\r\n]/);
+          for (const m of cell.matchAll(/\|/g)) {
+            const before = cell.slice(0, m.index).match(/\\*$/)?.[0].length ?? 0;
+            expect(before % 2, `pipe at ${m.index} in ${JSON.stringify(cell)}`).toBe(1);
+          }
+          expect(unescape(cell)).toBe(text.replace(/\r\n|\r|\n/g, ' '));
+        },
+      ),
+      { numRuns: 500 },
+    );
+  });
+
+  it('a hostile detail cannot add a column to the report', async () => {
+    const { results } = await run();
+    const hostile = results.map((r) => ({
+      ...r,
+      detail: 'evil \\| extra | cells \\\\| more\nnew row',
+    }));
+    const md = renderReport(hostile, {
+      date: '2026-09-30',
+      twentyVersion: 'v2.43.0',
+      baseUrl: 'https://twenty.test',
+    });
+    for (const line of md
+      .split('\n')
+      .filter((l) => l.startsWith('| ') && !l.startsWith('| Status') && !l.startsWith('|---'))) {
+      // Count only unescaped pipes: a row is exactly 4 cells wide (5 separators).
+      const separators = [...line.matchAll(/\|/g)].filter(
+        (m) => (line.slice(0, m.index).match(/\\*$/)?.[0].length ?? 0) % 2 === 0,
+      );
+      expect(separators, line).toHaveLength(5);
+    }
+    expect(md.split('\n').filter((l) => l.startsWith('|')).length).toBe(hostile.length + 2);
   });
 });

@@ -543,13 +543,24 @@ export async function runM0(ctx: M0Context): Promise<CheckResult[]> {
   return results;
 }
 
+/**
+ * Makes arbitrary text safe inside one cell of a markdown table. The backslash must be escaped FIRST: otherwise
+ * an input that already contains `\|` becomes `\\|`, where the backslash escapes the backslash and the pipe
+ * is live again, splitting the cell. (CodeQL: "Incomplete string escaping or encoding".) Line breaks would end
+ * the row, so they become spaces; a lone `\r` counts as one because some renderers treat it as a line ending.
+ * Details come from a server's responses and error bodies, so treat them as data.
+ */
+export function escapeTableCell(text: string): string {
+  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r\n|\r|\n/g, ' ');
+}
+
 export function renderReport(
   results: readonly CheckResult[],
   meta: { date: string; twentyVersion: string; baseUrl: string },
 ): string {
   const rows = results.map(
     (r) =>
-      `| ${r.status} | \`${r.id}\` | ${r.title} | ${r.detail.replace(/\|/g, '\\|').replace(/\n/g, ' ')} |`,
+      `| ${r.status} | \`${r.id}\` | ${escapeTableCell(r.title)} | ${escapeTableCell(r.detail)} |`,
   );
   const counts = (['PASS', 'FAIL', 'INFO', 'SKIP', 'MANUAL'] as const)
     .map((s) => `${results.filter((r) => r.status === s).length} ${s}`)

@@ -41,6 +41,18 @@ export interface TestDb {
   drop(): Promise<void>;
 }
 
+async function waitForNoBackends(admin: Client, database: string, timeoutMs = 3000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const { rows } = await admin.query<{ n: string }>(
+      'SELECT count(*)::text AS n FROM pg_stat_activity WHERE datname = $1',
+      [database],
+    );
+    if (Number(rows[0]?.n ?? 0) === 0 || Date.now() >= deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 export async function createTestDatabase(opts: { migrate?: boolean } = {}): Promise<TestDb> {
   if (!ADMIN_URL) throw new Error('FOLD_TEST_ADMIN_URL is not set');
   const admin = new Client({ connectionString: ADMIN_URL });
@@ -81,6 +93,11 @@ export async function createTestDatabase(opts: { migrate?: boolean } = {}): Prom
         const a = new Client({ connectionString: ADMIN_URL });
         await a.connect();
         try {
+          // pool.end() sends Terminate but does not wait for the server to process it. Dropping with FORCE right
+          // away can kill a backend whose client is already ending; that client has no error listener left, so the
+          // 57P01 surfaces as an unhandled error and fails an otherwise green run. Wait for our own backends to
+          // exit first; FORCE stays as the backstop for a genuinely stuck connection.
+          await waitForNoBackends(a, name);
           await a.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
         } finally {
           await a.end();
