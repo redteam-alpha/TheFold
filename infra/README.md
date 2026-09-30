@@ -16,21 +16,30 @@ Open http://localhost:3000, create the first workspace and an admin user. Mail l
 
 ## 2. Install the app (Node 24 required by `twenty-sdk`)
 
+First create an API key in Twenty (*Settings → APIs & Webhooks*). It gets the workspace's default role, which is enough to install. On a
+headless machine the key is also how the CLI signs in, since `remote:add` would otherwise want a browser.
+
 ```sh
 nvm use                                  # .nvmrc = 24
+export FOLD_M0_API_KEY=...               # the key you just created
 cd apps/fold-app
-npx twenty remote:add                    # point it at http://localhost:3000 and sign in
-npx twenty dev:build
-npx twenty app:install
+npx twenty remote:add --url http://localhost:3000 --api-key "$FOLD_M0_API_KEY" --as local
+npx twenty remote:status                 # confirm it is signed in
+npx twenty plan                          # preview only: read what it will create
+npx twenty apply --no-delete             # --no-delete: never remove anything that is not in our source
 ```
 
-Then in Twenty: *Settings → APIs & Webhooks → create an API key* and assign it the **"The Fold service account"** role.
+Do **not** use `app:install` for this. In `twenty-sdk@2.43.0` it installs an app that has already been *deployed* (published); `plan`/`apply` are the
+path for local source, and `twenty dev` is the same thing in watch mode.
+
+The **"The Fold service account"** role exists only after `apply`. Then, in Twenty, create (or edit) an API key, give it that role, and use *that*
+key for the harness, so it runs with the least privilege the real services will have.
 
 ## 3. Run the harness
 
 ```sh
 export FOLD_M0_BASE_URL=http://localhost:3000
-export FOLD_M0_API_KEY=...                       # from step 2
+export FOLD_M0_API_KEY=...                       # the service-account key from step 2
 # Optional, both opt-in:
 export FOLD_M0_RATE_TEST=1                       # sends ~150 GETs to find the rate limit
 export FOLD_M0_WEBHOOK_HOST=host.docker.internal # a name Twenty can reach this machine at

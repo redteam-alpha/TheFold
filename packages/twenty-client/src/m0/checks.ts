@@ -126,7 +126,7 @@ const CHECKS: { id: string; title: string; run: Check }[] = [
             `${ctx.model.objects.length} objects and ${ctx.model.personFields.length} Person fields present`,
           )
         : fail(
-            `missing objects: [${missingObjects.join(', ')}]; missing Person fields: [${missingFields.join(', ')}]`,
+            `missing objects: [${missingObjects.join(', ')}]; missing Person fields: [${missingFields.join(', ')}]. If the app has not been installed yet, run 'npx twenty plan' then 'npx twenty apply' in apps/fold-app (see infra/README.md); every check below that touches a custom object fails until then`,
           );
     },
   },
@@ -503,7 +503,7 @@ export const MANUAL_CHECKS: Omit<CheckResult, 'status'>[] = [
     id: 'app-install',
     title: 'The app builds and installs with the pinned SDK on Node 24',
     detail:
-      'In apps/fold-app run: yarn twenty remote:add, yarn twenty dev:build, yarn twenty app:install. Confirm every object, Person field, role and view from apps/fold-app/src/model appears, and the "The Fold" navigation folder is in the sidebar.',
+      'In apps/fold-app run: npx twenty remote:add --url <server> --api-key <key> --as local, then npx twenty plan (preview only) and npx twenty apply. (app:install is for a published app, not for local source.) Confirm every object, Person field, role and view from apps/fold-app/src/model appears, and the "The Fold" navigation folder is in the sidebar.',
   },
   {
     id: 'self-relations',

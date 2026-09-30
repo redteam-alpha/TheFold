@@ -77,7 +77,7 @@ Wired together in `apps/community-api/src/{intake,workers,twenty}` and tested en
 | Every dependency has an acceptable license; CAL/SSPL/BUSL etc. are denied | ✅ | `pnpm check:licenses` + `scripts/test/licensePolicy.test.ts` (locally; the CI run of it is below) |
 | Secret scan (gitleaks) finds nothing in the branch | ✅ | `Secret scan` job passed on GitHub Actions (2026-09-30) |
 | Lint, typecheck and unit tests (Node 22 and 24) and the PostgreSQL 16 database tests are green **on GitHub Actions** | ✅ | Green on GitHub Actions for commit `3364a19` (run `36680060596`, 2026-09-30). The first two CI runs failed at setup, before any test ran: `pnpm/action-setup` refused because the pnpm version was declared in both `ci.yml` and `package.json`; removing it from `ci.yml` was the only change needed |
-| The app **installs** with the pinned SDK on **Node 24** | ❓ | M0 manual `app-install`. The SDK declares `engines: node ^24.5.0`; we only typechecked/validated under Node 22 |
+| The app **installs** with the pinned SDK on **Node 24** | ❓ | M0 manual `app-install` (`npx twenty plan` / `apply`; **not** `app:install`, which installs a published app). The SDK declares `engines: node ^24.5.0`; we only typechecked/validated under Node 22 |
 
 ## 4. Assumptions about a running Twenty (M0 must answer these)
 
@@ -85,7 +85,11 @@ Each row names the harness check and the **one place** in our code that changes 
 
 | Assumption | Status | Harness check | If wrong, change |
 |---|---|---|---|
-| REST list/create/update/delete paths and response shapes (`/rest/<plural>`, `{data:{…}}`, `pageInfo`) | ❓ (🟡 against the fake) | `auth-and-rest`, `batch-limit-and-paging` | `unwrapRecords`, `nextCursorOf`, `listUpdatedSince` in `twenty-client/src/client.ts` |
+| `/healthz` answers, and a bearer API key authenticates against the REST API on a self-hosted `v2.43.0` | ✅ | `health`, `auth-and-rest` (2026-09-30, see the run log) | `TwentyClient` auth/headers |
+| REST **list** response shape on Person: `{data, totalCount, pageInfo}` | ✅ | `auth-and-rest` observed `GET /rest/people` → keys `data, totalCount, pageInfo` | `unwrapRecords`, `nextCursorOf` in `twenty-client/src/client.ts` |
+| REST create/update/delete paths and shapes for **our** objects (`/rest/<plural>`, `{data:{…}}`) | ❓ (🟡 against the fake) | `sourceref-idempotent`, `select-defaults`, `person-shapes`, `batch-limit-and-paging` — **not yet answered**: the first run happened before the app was installed, so each failed with `object '…' not found` | `unwrapRecords`, `nextCursorOf`, `listUpdatedSince` in `twenty-client/src/client.ts` |
+| The CLI has `remote:add --url --api-key --as`, `plan` (preview) and `apply [--no-delete]`; `app:install` is described as "Install a **deployed** app" | ✅ | `twenty --help` and `remote:add --help` printed on the real VM (2026-09-30); matches `twenty-sdk@2.43.0` source | `infra/README.md` step 2 |
+| `twenty plan` then `twenty apply --no-delete` installs **our** app from local source | ❓ | `app-installed` (automatic) and manual `app-install` | `infra/README.md` step 2; the model in `apps/fold-app/src/model` |
 | Filter syntax `sourceRef[eq]:"…"`, `updatedAt[gt]:"…"`, `order_by`, `starting_after` | ❓ | `sourceref-idempotent`, `batch-limit-and-paging` | REST adapter section of `client.ts`. **A server that ignores the filter would silently lose data; the harness has a check for exactly that** |
 | `sourceRef` uniqueness (`isUnique`) holds on custom objects and on Person | ❓ | `sourceref-idempotent` | `scalarField` in `apps/fold-app/src/model/build.ts` |
 | SELECT defaults written as `"'OPEN'"` apply as intended (not stored with quotes) | ❓ | `select-defaults` | `scalarField` (SELECT case) |
@@ -115,5 +119,26 @@ Each row names the harness check and the **one place** in our code that changes 
 
 ## 6. M0 run log
 
-*No run recorded yet.* After running `pnpm m0`, paste the generated table here (newest first) with the date and the
-Twenty version, and update the ❓ rows above.
+Paste each `pnpm m0` table here (newest first) with the date and the Twenty version, and update the ❓ rows above.
+
+### M0 run — 2026-09-30 — Twenty v2.43.0 — `http://localhost:3000` (self-hosted, TrueNAS VM, Node 24) — **before the app was installed**
+
+The app was not installed when this ran, so every check that touches a custom object failed for that one reason. Those failures say
+nothing yet about our filter, default-value, person-shape or batch assumptions; they stay ❓ until the next run. Long lists are abbreviated.
+
+| Status | Check | Observed |
+|---|---|---|
+| PASS | `health` | HTTP 200 |
+| PASS | `auth-and-rest` | `GET /rest/people` → keys `data, totalCount, pageInfo` |
+| FAIL | `app-installed` | expected: all 10 custom objects and all 37 Person extension fields missing |
+| FAIL | `sourceref-idempotent` | `GET /rest/followUps` → 400 `object 'followUps' not found` |
+| FAIL | `select-defaults` | `POST /rest/followUps` → 400 `object 'followUps' not found` |
+| FAIL | `person-shapes` | `POST /rest/households` → 400 `object 'households' not found` |
+| FAIL | `batch-limit-and-paging` | `POST /rest/batch/attendances` → 400 `object 'attendances' not found` |
+| INFO | `batch-61` | rejected with the same 400 (no information about the batch limit) |
+| SKIP | `rate-limit`, `webhook-signature` | opt-in checks not enabled |
+| MANUAL | 10 checks | not done yet; rows above unchanged |
+
+What the 400s do show: REST object paths are the plural of the object's API name (`followUps`, `households`, `attendances`), which is what the client
+already assumes. The install command in `infra/README.md` was wrong at the time (`app:install` installs a *published* app); it now says
+`plan` then `apply`.
