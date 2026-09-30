@@ -25,9 +25,16 @@ export FOLD_M0_API_KEY=...               # the key you just created
 cd apps/fold-app
 npx twenty remote:add --url http://localhost:3000 --api-key "$FOLD_M0_API_KEY" --as thefold
 npx twenty remote:status                 # confirm it is signed in
-npx twenty plan                          # preview only: read what it will create
-npx twenty apply --no-delete             # --no-delete: never remove anything that is not in our source
+npx twenty apply --force --no-delete     # first install: registers the app, uploads it, syncs the model
 ```
+
+Why `--force --no-delete` on the **first** install: `twenty plan` (and a plain `apply`, which previews first) sends a dry run to the server before anything has
+registered the app, and the server answers `No registration found for "<app id>"`. `--force` skips that preview and the delete confirmation; `--no-delete`
+means nothing is ever removed, which matters more on a workspace that already has data. Once the app is registered, `npx twenty plan` works and is the
+safe way to preview a change before `npx twenty apply --no-delete`. After a `git pull` that changes the model, re-run `apply`.
+
+If the server rejects the model it says so per entity (`fieldMetadata: … This name is reserved`, `Field metadata not found`…), and nothing is applied.
+Fix the model, not the server; `apps/fold-app/test/model.test.ts` guards the reserved names.
 
 Do **not** name the remote `local`. That is the CLI's built-in remote (`http://localhost:2020`, where its own `docker:start` container would run), and
 when `--as` names an existing remote, `remote:add` re-authenticates it with its stored URL and **ignores `--url`**. You then get `Cannot connect to

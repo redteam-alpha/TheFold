@@ -90,7 +90,12 @@ Each row names the harness check and the **one place** in our code that changes 
 | REST create/update/delete paths and shapes for **our** objects (`/rest/<plural>`, `{data:{…}}`) | ❓ (🟡 against the fake) | `sourceref-idempotent`, `select-defaults`, `person-shapes`, `batch-limit-and-paging` — **not yet answered**: the first run happened before the app was installed, so each failed with `object '…' not found` | `unwrapRecords`, `nextCursorOf`, `listUpdatedSince` in `twenty-client/src/client.ts` |
 | The CLI has `remote:add --url --api-key --as`, `plan` (preview) and `apply [--no-delete]`; `app:install` is described as "Install a **deployed** app" | ✅ | `twenty --help` and `remote:add --help` printed on the real VM (2026-09-30); matches `twenty-sdk@2.43.0` source | `infra/README.md` step 2 |
 | `remote:add --as <existing name>` re-authenticates that remote with its **stored** URL and ignores `--url`; `local` always exists and points at `http://localhost:2020` | ✅ | Observed on the VM: `--as local --url http://localhost:3000` failed with `Cannot connect to Twenty server` while `curl localhost:3000/healthz` was 200 and `remote:list` showed `local  http://localhost:2020  [none]`; explained by the SDK source | use a new name such as `thefold` |
-| `twenty plan` then `twenty apply --no-delete` installs **our** app from local source | ❓ | `app-installed` (automatic) and manual `app-install` | `infra/README.md` step 2; the model in `apps/fold-app/src/model` |
+| `twenty plan` needs the app to be registered already: on a fresh server it fails with `No registration found for "<app id>"` | ✅ | Observed on the VM (2026-09-30) | `infra/README.md` step 2 |
+| `twenty apply --force --no-delete` registers the app, uploads its files and reaches the server's metadata validation (`Syncing manifest…`) | ✅ | Observed on the VM (2026-09-30); `--force` skips the dry run that fails before registration | `infra/README.md` step 2 |
+| The app builds and **typechecks** with the pinned SDK on **Node 24** | ✅ | Observed on the VM: `Building application files…` and `Running typecheck…` passed (2026-09-30) | none |
+| Twenty **rejects reserved names** (`address`, `role`, `events`, `event`… 66 in all) on objects and fields; the SDK's own `define*` validators do **not** check this | ✅ | Observed on the VM: 5 of our names rejected. The list was read from `twenty-shared`'s `RESERVED_METADATA_NAME_KEYWORDS` embedded in `twenty-sdk@2.43.0`'s source map (not exported) | `TWENTY_RESERVED_NAMES` in `apps/fold-app/test/model.test.ts` — **refresh on every SDK bump** |
+| A view must reference Person's own fields (`name`, `emails`…) by **Twenty's** ids, never ids derived from our registry | ✅ | Observed on the VM: `People by stage` → `Field metadata not found` for Person `name` | `viewFieldId` in `apps/fold-app/src/model/views.ts` |
+| The server **accepts our model** and installs the app (objects, Person fields, roles, views, navigation) | ❓ | Not yet: the first attempt was rejected for the two causes above; re-run `apply` after `git pull` | `apps/fold-app/src/model`; the server names each entity it rejects |
 | Filter syntax `sourceRef[eq]:"…"`, `updatedAt[gt]:"…"`, `order_by`, `starting_after` | ❓ | `sourceref-idempotent`, `batch-limit-and-paging` | REST adapter section of `client.ts`. **A server that ignores the filter would silently lose data; the harness has a check for exactly that** |
 | `sourceRef` uniqueness (`isUnique`) holds on custom objects and on Person | ❓ | `sourceref-idempotent` | `scalarField` in `apps/fold-app/src/model/build.ts` |
 | SELECT defaults written as `"'OPEN'"` apply as intended (not stored with quotes) | ❓ | `select-defaults` | `scalarField` (SELECT case) |
@@ -121,6 +126,19 @@ Each row names the harness check and the **one place** in our code that changes 
 ## 6. M0 run log
 
 Paste each `pnpm m0` table here (newest first) with the date and the Twenty version, and update the ❓ rows above.
+
+### Install attempt — 2026-09-30 — Twenty v2.43.0, `twenty-sdk` 2.43.0, Node 24 — **rejected by the server**
+
+`npx twenty plan` → `No registration found for "e9d9ab0a-…"` (the dry run precedes registration). `npx twenty apply --force --no-delete` → registered the
+app, uploaded 1 file, `Syncing manifest…`, then **22 errors, nothing applied**:
+
+| Entity | Errors | Cause | Fix |
+|---|---|---|---|
+| `fieldMetadata` | 5 × `INVALID_FIELD_INPUT: This name is reserved` (`address`, `role`, `events` twice, `event`) | Twenty reserves these names | renamed to `homeAddress`, `groupRole`, `churchEvents` (both), `churchEvent` |
+| `fieldMetadata` | 2 × `FIELD_METADATA_NOT_FOUND: Relation field target metadata not found` | the other side of those relations was rejected | expected to disappear with the renames |
+| `viewField` | 15 × `INVALID_VIEW_DATA: Field metadata not found` | one is our `People by stage` column for Person `name` (an id from our registry instead of Twenty's standard id); the other 14 belong to the default views of objects whose fields failed | `viewFieldId`; the rest expected to disappear |
+
+Not yet known: whether the server accepts the corrected model. The next `apply` will say.
 
 ### M0 run — 2026-09-30 — Twenty v2.43.0 — `http://localhost:3000` (self-hosted, TrueNAS VM, Node 24) — **before the app was installed**
 

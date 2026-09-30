@@ -3,6 +3,7 @@ import { id, uid } from '@thefold/shared';
 import { LIFECYCLE_STAGES, CARE_REQUEST_STATUSES } from '@thefold/core';
 import {
   NavigationMenuItemType,
+  STANDARD_OBJECT,
   ViewCalendarLayout,
   ViewFilterOperand,
   ViewSortDirection,
@@ -10,9 +11,26 @@ import {
   type ViewConfig,
   type defineNavigationMenuItem,
 } from 'twenty-sdk/define';
-import { objectId } from './build.js';
+import { PERSON, objectId } from './build.js';
 
 export type NavConfig = Parameters<typeof defineNavigationMenuItem>[0];
+
+const STANDARD_PERSON_FIELD_IDS: ReadonlyMap<string, string> = new Map(
+  Object.entries(STANDARD_OBJECT.person.fields).map(([name, f]) => [name, f.universalIdentifier]),
+);
+
+/**
+ * The id a view column, filter or sort points at. Person is Twenty's own object: its `name`, `emails`…
+ * have Twenty's standard ids, and an id derived from our registry would name a field that does not exist
+ * (the server answers "Field metadata not found"). Everything else is ours.
+ */
+export function viewFieldId(object: string, field: string): string {
+  if (object === PERSON) {
+    const standard = STANDARD_PERSON_FIELD_IDS.get(field);
+    if (standard) return standard;
+  }
+  return id.field(object, field);
+}
 
 interface ViewSpec {
   key: string;
@@ -112,7 +130,7 @@ export const VIEW_SPECS: readonly ViewSpec[] = [
 export function buildView(key: string): ViewConfig {
   const v = VIEW_SPECS.find((s) => s.key === key);
   if (!v) throw new Error(`Unknown view: ${key}`);
-  const f = (field: string) => id.field(v.object, field);
+  const f = (field: string) => viewFieldId(v.object, field);
   return {
     universalIdentifier: id.view(v.key),
     name: v.name,

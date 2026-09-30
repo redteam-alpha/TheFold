@@ -66,6 +66,7 @@ importers:
       '@thefold/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+    devDependencies:
       twenty-sdk:
         specifier: 2.43.0
         version: 2.43.0(@types/node@22.20.4)

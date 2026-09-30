@@ -33,6 +33,7 @@ import {
   buildNavFolder,
   buildNavItem,
   buildView,
+  viewFieldId,
 } from '../src/model/views.js';
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '../src');
@@ -174,6 +175,51 @@ describe('data model', () => {
     const names = person.map((f) => f.name);
     expect(new Set(names).size).toBe(names.length);
     expect(names).not.toContain('name'); // Person's own name field is Twenty's
+  });
+
+  /**
+   * Names Twenty refuses for any object or field ("This name is reserved"). The SDK's own define* validators
+   * do NOT check this, so the model passed every local test and was then rejected by a real server.
+   *
+   * Source: `RESERVED_METADATA_NAME_KEYWORDS` in `twenty-shared` (bundled into twenty-sdk 2.43.0, not exported).
+   * Refresh this copy whenever twenty-sdk is bumped.
+   */
+  const TWENTY_RESERVED_NAMES = new Set([
+    ...['approvedAccessDomain', 'appToken', 'billingCustomer', 'billingEntitlement', 'billingMeter'],
+    ...['billingProduct', 'billingSubscription', 'billingSubscriptionItem', 'featureFlag', 'job'],
+    ...['keyValuePair', 'pageLayout', 'pageLayoutTab', 'pageLayoutWidget', 'twoFactorMethod', 'user'],
+    ...['userWorkspace', 'workspace', 'role', 'userWorkspaceRole', 'plan', 'event', 'field', 'link'],
+    ...['currency', 'address', 'type', 'object', 'relation', 'search'],
+    // plural forms (and the few names that are only ever plural or verbs)
+    ...['approvedAccessDomains', 'appTokens', 'billingCustomers', 'billingEntitlements'],
+    ...['billingMeters', 'billingProducts', 'billingSubscriptions', 'billingSubscriptionItems'],
+    ...['featureFlags', 'jobs', 'keyValuePairs', 'pageLayouts', 'pageLayoutTabs', 'pageLayoutWidgets'],
+    ...['twoFactorMethods', 'users', 'userWorkspaces', 'workspaces', 'roles', 'userWorkspaceRoles'],
+    ...['plans', 'events', 'fields', 'links', 'currencies', 'fullNames', 'addresses', 'types'],
+    ...['objects', 'index', 'relations', 'aggregate', 'connect', 'create', 'disconnect', 'searches'],
+  ]);
+
+  it('the reserved-name list is the 66 names of twenty-shared 2.43.0', () => {
+    expect(TWENTY_RESERVED_NAMES.size).toBe(66);
+  });
+
+  it('uses no name Twenty reserves, for any object, field or relation', () => {
+    const names: { where: string; name: string }[] = [];
+    for (const o of OBJECTS) {
+      names.push({ where: `object ${o.key} (singular)`, name: o.nameSingular });
+      names.push({ where: `object ${o.key} (plural)`, name: o.namePlural });
+    }
+    for (const { key, cfg } of objects)
+      for (const f of cfg.fields) names.push({ where: `${key} field`, name: f.name });
+    for (const f of person) names.push({ where: 'person field', name: f.name });
+    const clashes = names.filter((n) => TWENTY_RESERVED_NAMES.has(n.name));
+    expect(clashes.map((c) => `${c.where}: ${c.name}`)).toEqual([]);
+  });
+
+  it('gives no Person field of ours the name of one of Twenty’s own Person fields', () => {
+    const standard = new Set(Object.keys(STANDARD_OBJECT.person.fields));
+    const clashes = person.map((f) => f.name).filter((n) => standard.has(n));
+    expect(clashes).toEqual([]);
   });
 
   it('every object’s label field exists and is text', () => {
@@ -506,11 +552,17 @@ describe('views and navigation', () => {
           : []),
       ];
       for (const r of refs)
-        expect(
-          known.has(r) || twentyPersonFields.has(r) || r === id.field('person', 'name'),
-          `${v.key}: ${r}`,
-        ).toBe(true);
+        expect(known.has(r) || twentyPersonFields.has(r), `${v.key}: ${r}`).toBe(true);
     }
+  });
+
+  it('points Person columns at Twenty’s own field ids, and everything else at ours', () => {
+    // A view asking for Person's `name` with an id from our registry named a field that does not exist,
+    // and the server answered "Field metadata not found".
+    expect(viewFieldId('person', 'name')).toBe(STANDARD_OBJECT.person.fields.name.universalIdentifier);
+    expect(viewFieldId('person', 'name')).not.toBe(id.field('person', 'name'));
+    expect(viewFieldId('person', 'firstVisitDate')).toBe(id.field('person', 'firstVisitDate'));
+    expect(viewFieldId('followUp', 'name')).toBe(id.field('followUp', 'name'));
   });
 
   it('never ranks, scores or shames: no such view, column or name exists', () => {

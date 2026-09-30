@@ -14,7 +14,9 @@
   },
   "dependencies": {
     "@thefold/core": "workspace:*",
-    "@thefold/shared": "workspace:*",
+    "@thefold/shared": "workspace:*"
+  },
+  "devDependencies": {
     "twenty-sdk": "2.43.0"
   }
 }

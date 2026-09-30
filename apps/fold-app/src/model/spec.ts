@@ -90,7 +90,8 @@ export const OBJECTS: readonly ObjectSpec[] = [
     icon: 'IconHome',
     fields: [
       nameField(),
-      { name: 'address', label: 'Address', type: 'ADDRESS', icon: 'IconMap' },
+      // Not `address`: Twenty reserves it (RESERVED_METADATA_NAME_KEYWORDS), see test/model.test.ts.
+      { name: 'homeAddress', label: 'Address', type: 'ADDRESS', icon: 'IconMap' },
       sourceRef,
     ],
   },
@@ -173,7 +174,8 @@ export const OBJECTS: readonly ObjectSpec[] = [
     icon: 'IconUserPlus',
     fields: [
       nameField('Label'),
-      { name: 'role', label: 'Role', type: 'SELECT', options: GROUP_ROLES, default: 'MEMBER' },
+      // Not `role`: Twenty reserves it (RESERVED_METADATA_NAME_KEYWORDS), see test/model.test.ts.
+      { name: 'groupRole', label: 'Role', type: 'SELECT', options: GROUP_ROLES, default: 'MEMBER' },
       {
         name: 'status',
         label: 'Status',
@@ -434,12 +436,13 @@ export const RELATIONS: readonly RelationSpec[] = [
   },
   {
     many: { object: 'churchEvent', name: 'group', label: 'Group' },
-    one: { object: 'churchGroup', name: 'events', label: 'Events' },
+    // `events` and `event` are reserved by Twenty (RESERVED_METADATA_NAME_KEYWORDS), hence `churchEvents`.
+    one: { object: 'churchGroup', name: 'churchEvents', label: 'Events' },
     onDelete: 'SET_NULL',
   },
   {
     many: { object: 'churchEvent', name: 'campus', label: 'Campus' },
-    one: { object: 'campus', name: 'events', label: 'Events' },
+    one: { object: 'campus', name: 'churchEvents', label: 'Events' },
     onDelete: 'SET_NULL',
   },
   {
@@ -448,7 +451,7 @@ export const RELATIONS: readonly RelationSpec[] = [
     onDelete: 'CASCADE',
   },
   {
-    many: { object: 'eventRegistration', name: 'event', label: 'Event' },
+    many: { object: 'eventRegistration', name: 'churchEvent', label: 'Event' },
     one: { object: 'churchEvent', name: 'registrations', label: 'Registrations' },
     onDelete: 'CASCADE',
   },
