@@ -2,7 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { FOLD_ID_NAMESPACE, id, isUuid, sha1, uid, uuidV5 } from '../src/index.js';
+import { deterministicUuid, FOLD_ID_NAMESPACE, id, isUuid, sha1, uid } from '../src/index.js';
 
 const nodeSha1 = (s: string) => new Uint8Array(createHash('sha1').update(s).digest());
 
@@ -29,31 +29,39 @@ describe('sha1', () => {
   });
 });
 
-describe('uuidV5', () => {
-  const DNS = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
+describe('deterministicUuid', () => {
+  const NS = 'b9c89a89-447d-4794-ae1c-23278b1a3ff5';
+  const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-  it('matches the reference vector (Python: uuid5(NAMESPACE_DNS, "python.org"))', () => {
-    expect(uuidV5('python.org', DNS)).toBe('886313e1-3b8a-5372-9b90-0c9aee199e5d');
+  it('matches an independent implementation (Python hashlib, computed outside this repo)', () => {
+    // python3: h = bytearray(hashlib.sha1(uuid.UUID(NS).bytes + name.encode()).digest()[:16]); h[6] = h[6]&15|0x40; h[8] = h[8]&63|0x80
+    expect(deterministicUuid('application.thefold', NS)).toBe(
+      'e9d9ab0a-110c-4b69-98f8-983cf0cc8ed9',
+    );
+    expect(deterministicUuid('object.followUp', NS)).toBe('e711521b-27fd-413d-a41e-1d0826879156');
+    expect(deterministicUuid('field.followUp.dueAt', NS)).toBe(
+      '1d27a6d5-87ab-47bd-a9ba-a33ee94a5c11',
+    );
+    expect(deterministicUuid('field.person.lifecycleStage', NS)).toBe(
+      '0425eab9-b2d6-4f5c-872d-9aa97820f92d',
+    );
   });
 
-  it('sets version 5 and the RFC 4122 variant', () => {
+  it('always yields a valid UUID v4 (what Twenty’s tooling requires)', () => {
     fc.assert(
       fc.property(fc.string({ maxLength: 60 }), (name) => {
-        const u = uuidV5(name, DNS);
-        expect(isUuid(u)).toBe(true);
-        expect(u[14]).toBe('5');
-        expect('89ab').toContain(u[19]);
+        expect(deterministicUuid(name, NS)).toMatch(V4);
       }),
     );
   });
 
   it('rejects a malformed namespace', () => {
-    expect(() => uuidV5('x', 'not-a-uuid')).toThrow(RangeError);
+    expect(() => deterministicUuid('x', 'not-a-uuid')).toThrow(RangeError);
   });
 
   it('is deterministic and namespace-sensitive', () => {
-    expect(uuidV5('x', DNS)).toBe(uuidV5('x', DNS));
-    expect(uuidV5('x', DNS)).not.toBe(uuidV5('x', randomUUID()));
+    expect(deterministicUuid('x', NS)).toBe(deterministicUuid('x', NS));
+    expect(deterministicUuid('x', NS)).not.toBe(deterministicUuid('x', randomUUID()));
   });
 });
 
@@ -63,20 +71,17 @@ describe('universalIdentifier registry', () => {
   });
 
   it('PINS known identifiers. If this fails you changed a key or the namespace: existing workspaces would orphan their data', () => {
-    expect(uid('object.household')).toBe(uuidV5('object.household', FOLD_ID_NAMESPACE));
     expect({
       application: id.application(),
       followUp: id.object('followUp'),
       dueAt: id.field('followUp', 'dueAt'),
       lifecycleStage: id.field('person', 'lifecycleStage'),
-    }).toMatchInlineSnapshot(`
-      {
-        "application": "e9d9ab0a-110c-5b69-98f8-983cf0cc8ed9",
-        "dueAt": "1d27a6d5-87ab-57bd-a9ba-a33ee94a5c11",
-        "followUp": "e711521b-27fd-513d-a41e-1d0826879156",
-        "lifecycleStage": "0425eab9-b2d6-5f5c-872d-9aa97820f92d",
-      }
-    `);
+    }).toEqual({
+      application: 'e9d9ab0a-110c-4b69-98f8-983cf0cc8ed9',
+      followUp: 'e711521b-27fd-413d-a41e-1d0826879156',
+      dueAt: '1d27a6d5-87ab-47bd-a9ba-a33ee94a5c11',
+      lifecycleStage: '0425eab9-b2d6-4f5c-872d-9aa97820f92d',
+    });
   });
 
   it('rejects keys that do not look like registry keys', () => {

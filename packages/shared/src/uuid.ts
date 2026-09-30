@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A tiny, dependency-free RFC 4122 UUIDv5 (SHA-1, name-based). Twenty requires every app entity to
-// carry a stable `universalIdentifier`; deriving them from readable keys means they are reviewable,
-// reproducible and can never silently drift. Do not use this for anything security-sensitive.
+// A tiny, dependency-free deterministic UUID generator. Twenty requires every app entity to carry a stable
+// `universalIdentifier`, and its scaffolding guidance says these must be valid UUID **v4** (create-twenty-app
+// AGENTS.md), so the result of hashing a readable key is stamped with version-4 and RFC 4122 variant bits.
+// Deriving ids from keys makes them reviewable and reproducible and stops them silently drifting.
+// The output is *deterministic*, not random: do not use it for anything security-sensitive.
 
 /** SHA-1 of `msg` (FIPS 180-4). */
 export function sha1(msg: Uint8Array): Uint8Array {
@@ -85,15 +87,18 @@ function formatUuid(bytes: Uint8Array): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-/** RFC 4122 §4.3 name-based UUID using SHA-1. */
-export function uuidV5(name: string, namespace: string): string {
+/**
+ * SHA-1(namespace ‖ name), first 16 bytes, stamped as a version-4 / variant-1 UUID.
+ * Cross-checked against an independent implementation (Python hashlib) in test/identifiers.test.ts.
+ */
+export function deterministicUuid(name: string, namespace: string): string {
   const ns = parseUuid(namespace);
   const nameBytes = new TextEncoder().encode(name);
   const input = new Uint8Array(ns.length + nameBytes.length);
   input.set(ns);
   input.set(nameBytes, ns.length);
   const hash = sha1(input).slice(0, 16);
-  hash[6] = ((hash[6] as number) & 0x0f) | 0x50;
+  hash[6] = ((hash[6] as number) & 0x0f) | 0x40;
   hash[8] = ((hash[8] as number) & 0x3f) | 0x80;
   return formatUuid(hash);
 }

@@ -42,6 +42,16 @@ export type AttendanceKind = (typeof ATTENDANCE_KINDS)[number];
 export const ATTENDANCE_SOURCES = ['CHECKIN', 'LEADER', 'STAFF', 'IMPORT'] as const;
 export type AttendanceSource = (typeof ATTENDANCE_SOURCES)[number];
 
+export const GROUP_TYPES = [
+  'SMALL_GROUP',
+  'MINISTRY',
+  'SERVING_TEAM',
+  'CLASS',
+  'SUPPORT',
+  'YOUTH',
+] as const;
+export type GroupType = (typeof GROUP_TYPES)[number];
+
 export const GROUP_OPENNESS = ['PUBLIC', 'CLOSED', 'SECRET'] as const;
 export type GroupOpenness = (typeof GROUP_OPENNESS)[number];
 
@@ -56,6 +66,32 @@ export type EventRegistrationStatus = (typeof EVENT_REGISTRATION_STATUSES)[numbe
 
 export const CARE_REQUEST_STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'] as const;
 export type CareRequestStatus = (typeof CARE_REQUEST_STATUSES)[number];
+
+export const CARE_PRIORITIES = ['NORMAL', 'HIGH', 'URGENT'] as const;
+export type CarePriority = (typeof CARE_PRIORITIES)[number];
+
+/** The *kind of care*, never the person's circumstances: a category can itself be sensitive. */
+export const CARE_CATEGORIES = [
+  'VISIT',
+  'MEAL',
+  'PRAYER',
+  'PRACTICAL_HELP',
+  'CHECK_IN',
+  'OTHER',
+] as const;
+export type CareCategory = (typeof CARE_CATEGORIES)[number];
+
+export const CONTACT_METHODS = ['CALL', 'TEXT', 'EMAIL', 'VISIT', 'IN_PERSON'] as const;
+export type ContactMethod = (typeof CONTACT_METHODS)[number];
+
+export const COMMUNICATION_PREFERENCES = ['EMAIL', 'PHONE', 'TEXT', 'IN_PERSON'] as const;
+export type CommunicationPreference = (typeof COMMUNICATION_PREFERENCES)[number];
+
+export const SHEPHERD_ROLES = ['WELCOMER', 'SHEPHERD'] as const;
+export type ShepherdRole = (typeof SHEPHERD_ROLES)[number];
+
+export const TOUCHPOINT_KINDS = ['ATTEMPT', 'AWAY'] as const;
+export type TouchpointKind = (typeof TOUCHPOINT_KINDS)[number];
 
 export const DEDUPE_STATUSES = ['CLEAR', 'NEEDS_REVIEW', 'MERGED'] as const;
 export type DedupeStatus = (typeof DEDUPE_STATUSES)[number];

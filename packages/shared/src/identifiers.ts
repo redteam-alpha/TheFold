@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { uuidV5 } from './uuid.js';
+import { deterministicUuid } from './uuid.js';
 
 /**
  * Namespace for every `universalIdentifier` in The Fold's Twenty app.
@@ -21,7 +21,7 @@ export function uid(key: string): string {
       `Identifier keys look like "object.household" or "field.person.lifecycleStage": ${key}`,
     );
   }
-  return uuidV5(key, FOLD_ID_NAMESPACE);
+  return deterministicUuid(key, FOLD_ID_NAMESPACE);
 }
 
 export const id = {
