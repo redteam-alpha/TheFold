@@ -73,8 +73,10 @@ Wired together in `apps/community-api/src/{intake,workers,twenty}` and tested en
 | No free-text field can hold a confidence; the complete list of text fields is pinned | ✅ | `model.test.ts` (sensitive text policy) |
 | Only admin/pastor/care team/service can read care requests; nobody can destroy records; no row-level permissions used | ✅ | `model.test.ts` (roles) — *as declared*; enforcement by a live Twenty is ❓ below |
 | Docker image `twentycrm/twenty:v2.43.0` exists | ✅ | Docker Hub registry manifest lookup returned 200 for `v2.43.0` (and `latest`) on 2026-09-30 |
-| `infra/docker-compose.yml` is valid and refuses to start without its secrets | ✅ | `docker compose config` (with and without secrets); the CI job asserts both |
-| Every dependency has an acceptable license; CAL/SSPL/BUSL etc. are denied | ✅ | `pnpm check:licenses` + `scripts/test/licensePolicy.test.ts` |
+| `infra/docker-compose.yml` is valid and refuses to start without its secrets | ✅ | `docker compose config` (with and without secrets); the `Compose file is valid` job also passed on GitHub Actions (2026-09-30) |
+| Every dependency has an acceptable license; CAL/SSPL/BUSL etc. are denied | ✅ | `pnpm check:licenses` + `scripts/test/licensePolicy.test.ts` (locally; the CI run of it is below) |
+| Secret scan (gitleaks) finds nothing in the branch | ✅ | `Secret scan` job passed on GitHub Actions (2026-09-30) |
+| Lint, typecheck and unit tests (Node 22 and 24) and the PostgreSQL 16 database tests are green **on GitHub Actions** | ❓ | They pass locally (`pnpm check`), which is not the same as CI. The first two CI runs failed at setup, before any test ran: `pnpm/action-setup` refused because the pnpm version was declared in both `ci.yml` and `package.json`. Fixed by removing it from `ci.yml`; awaiting the re-run |
 | The app **installs** with the pinned SDK on **Node 24** | ❓ | M0 manual `app-install`. The SDK declares `engines: node ^24.5.0`; we only typechecked/validated under Node 22 |
 
 ## 4. Assumptions about a running Twenty (M0 must answer these)
