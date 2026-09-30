@@ -1,0 +1,15 @@
+{
+  "name": "@thefold/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "description": "Framework-free domain logic for The Fold: drift, welcomer assignment, follow-up scheduling, identity matching, prayer visibility, digests.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  }
+}

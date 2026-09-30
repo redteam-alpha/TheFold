@@ -1,0 +1,43 @@
+The Fold
+Copyright (C) 2026 The Fold contributors
+
+The Fold is free software licensed under the GNU Affero General Public License,
+version 3 or (at your option) any later version. See LICENSE.
+
+------------------------------------------------------------------------------
+Built on Twenty
+------------------------------------------------------------------------------
+The Fold is designed to run alongside an UNMODIFIED build of Twenty CRM
+(https://github.com/twentyhq/twenty), and ships an application ("apps/fold-app")
+that uses Twenty's published SDK and APIs (twenty-sdk, twenty-client-sdk: MIT).
+
+  * The Fold is not Twenty, is not an official Twenty product, and is not
+    endorsed by Twenty.com PBC. "Twenty" is a trademark of its owner; see
+    https://github.com/twentyhq/twenty/blob/main/.github/TRADEMARK.md.
+  * The Fold does not copy, modify or redistribute Twenty's source code. If that
+    ever changes, the modified version is subject to Twenty's license, including
+    section 13 (remote network interaction) of the AGPL, and any files marked
+    "@license Enterprise" must not be used in production without a commercial
+    license from Twenty. See docs/enterprise-avoid.md.
+
+------------------------------------------------------------------------------
+Inspired by Open Source Social Network (OSSN) — clean-room statement
+------------------------------------------------------------------------------
+Some community features (groups with a join-request flow, post visibility
+levels, reactions, notifications) were inspired by the *ideas and public
+behaviour* of Open Source Social Network (https://github.com/opensource-socialnetwork).
+
+  * No OSSN source code, SQL, templates, translations or assets are copied into
+    this repository. OSSN is licensed under the Cryptographic Autonomy License
+    1.0 (CAL-1.0), which is not compatible with the AGPL for combined works.
+  * Contributors must not copy code from OSSN into The Fold, and must not port
+    it line by line. Design from the behaviour, not from the source.
+  * The schema in apps/community-api was designed independently (typed tables,
+    tenant row-level security), not derived from OSSN's schema.
+
+------------------------------------------------------------------------------
+Third-party software
+------------------------------------------------------------------------------
+Dependencies are listed in pnpm-lock.yaml and retain their own licenses. CI
+rejects dependencies under licenses that cannot be combined with the AGPL
+(for example CAL-1.0, SSPL). This file is informational, not legal advice.
