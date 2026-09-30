@@ -64,7 +64,8 @@ export const connectionCardSchema = z
     message: 'Please share an email or a phone number so someone can say hello',
     path: ['email'],
   });
-export type ConnectionCard = z.infer<typeof connectionCardSchema>;
+export type ConnectionCardInput = z.input<typeof connectionCardSchema>;
+export type ConnectionCard = z.output<typeof connectionCardSchema>;
 
 /**
  * Creating a prayer request. `tier` has no default on purpose: the person must choose who sees it.
@@ -88,7 +89,8 @@ export const prayerRequestCreateSchema = z
     message: 'A care-only request always creates a care follow-up',
     path: ['followUpWanted'],
   });
-export type PrayerRequestCreate = z.infer<typeof prayerRequestCreateSchema>;
+export type PrayerRequestCreateInput = z.input<typeof prayerRequestCreateSchema>;
+export type PrayerRequestCreate = z.output<typeof prayerRequestCreateSchema>;
 
 /** What the webhook adapter distils from a Twenty webhook: "this record may have changed". */
 export const webhookHintSchema = z.object({
@@ -125,6 +127,19 @@ export const outboxJobSchema = z.discriminatedUnion('kind', [
     guest: connectionCardSchema,
   }),
   z.object({
+    kind: z.literal('twenty.createCareRequest'),
+    idempotencyKey: z.string().min(1).max(200),
+    careRequest: z.object({
+      personId: z.uuid(),
+      ownerPersonId: z.uuid().nullable(),
+      priority: z.enum(['NORMAL', 'HIGH', 'URGENT']),
+      /** Coarse *kind of care*, never the person's circumstances. */
+      category: z.enum(['VISIT', 'MEAL', 'PRAYER', 'PRACTICAL_HELP', 'CHECK_IN', 'OTHER']),
+      /** Opaque pointer to the confidential record in community-api. Not the text. */
+      communityRef: z.uuid(),
+    }),
+  }),
+  z.object({
     kind: z.literal('twenty.recordAttendance'),
     idempotencyKey: z.string().min(1).max(200),
     attendance: z.object({
@@ -136,4 +151,7 @@ export const outboxJobSchema = z.discriminatedUnion('kind', [
     }),
   }),
 ]);
-export type OutboxJob = z.infer<typeof outboxJobSchema>;
+/** What callers pass in (defaults and transforms not yet applied). */
+export type OutboxJobInput = z.input<typeof outboxJobSchema>;
+/** What comes out of the queue after validation. */
+export type OutboxJob = z.output<typeof outboxJobSchema>;

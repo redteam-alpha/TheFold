@@ -1,0 +1,20 @@
+{
+  "name": "@thefold/community-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "description": "The Fold community service: tenant-isolated Postgres, the Twenty sync pipeline, confidential care storage and automation workers.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@thefold/core": "workspace:*",
+    "@thefold/shared": "workspace:*",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
+  }
+}

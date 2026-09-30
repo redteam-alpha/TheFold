@@ -48,7 +48,7 @@ export function sha1(msg: Uint8Array): Uint8Array {
         f = b ^ c ^ d;
         k = 0xca62c1d6;
       }
-      const t = ((((a << 5) | (a >>> 27)) + f + e + k + (w[i] as number)) >>> 0);
+      const t = (((a << 5) | (a >>> 27)) + f + e + k + (w[i] as number)) >>> 0;
       e = d;
       d = c;
       c = ((b << 30) | (b >>> 2)) >>> 0;
