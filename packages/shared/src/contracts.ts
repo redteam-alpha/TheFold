@@ -25,47 +25,69 @@ const optionalTrimmed = (max: number) =>
     .transform((v) => (v === '' ? undefined : v));
 
 /**
+ * Mobile keyboards routinely append a space to autocompleted emails, and an untouched field arrives as "".
+ * Neither should turn away a first-time guest: trim, and treat empty as "not provided".
+ */
+const optionalEmail = z
+  .string()
+  .trim()
+  .transform((v) => (v === '' ? undefined : v))
+  .pipe(z.email().max(254).optional())
+  .optional();
+
+const guestFields = z.object({
+  firstName: trimmed(80),
+  lastName: trimmed(80),
+  email: optionalEmail,
+  phone: optionalTrimmed(40),
+  /** People the guest came with; they get their own Person, linked into one household. */
+  householdMembers: z
+    .array(
+      z.object({
+        firstName: trimmed(80),
+        lastName: optionalTrimmed(80),
+        isChild: z.boolean().default(false),
+      }),
+    )
+    .max(12)
+    .default([]),
+  interests: z.array(trimmed(60)).max(20).default([]),
+  howHeard: optionalTrimmed(200),
+  visitedOn: localDateSchema.optional(),
+  campusId: z.uuid().optional(),
+  /** Consent to be contacted by the church. Without any contact method + consent there is no follow-up. */
+  contactConsent: z.object({
+    byEmail: z.boolean().default(false),
+    byPhone: z.boolean().default(false),
+    byText: z.boolean().default(false),
+  }),
+});
+
+const hasWayToSayHello = (c: { email?: string | undefined; phone?: string | undefined }) =>
+  c.email !== undefined || (c.phone !== undefined && c.phone !== '');
+const needsContact = {
+  message: 'Please share an email or a phone number so someone can say hello',
+  path: ['email'],
+};
+
+/**
  * The public connection card ("I'm new here"). Deliberately small: name, one way to reach the
  * person, what they're interested in, and what they consent to. A prayer request is NOT part of
- * this payload — it has its own consented flow (`prayerRequestCreateSchema`).
+ * this payload -- it has its own consented flow (`prayerRequestCreateSchema`).
  */
-export const connectionCardSchema = z
-  .object({
-    firstName: trimmed(80),
-    lastName: trimmed(80),
-    email: z.email().max(254).optional(),
-    phone: optionalTrimmed(40),
-    /** People the guest came with; they get their own Person, linked into one household. */
-    householdMembers: z
-      .array(
-        z.object({
-          firstName: trimmed(80),
-          lastName: optionalTrimmed(80),
-          isChild: z.boolean().default(false),
-        }),
-      )
-      .max(12)
-      .default([]),
-    interests: z.array(trimmed(60)).max(20).default([]),
-    howHeard: optionalTrimmed(200),
-    visitedOn: localDateSchema.optional(),
-    campusId: z.uuid().optional(),
-    /** Consent to be contacted by the church. Without any contact method + consent there is no follow-up. */
-    contactConsent: z.object({
-      byEmail: z.boolean().default(false),
-      byPhone: z.boolean().default(false),
-      byText: z.boolean().default(false),
-    }),
+export const connectionCardSchema = guestFields
+  .extend({
     /** Anti-abuse: must be empty. Filled by bots. */
     website: z.string().max(0).optional(),
     captchaToken: z.string().max(4096).optional(),
   })
-  .refine((c) => c.email !== undefined || (c.phone !== undefined && c.phone !== ''), {
-    message: 'Please share an email or a phone number so someone can say hello',
-    path: ['email'],
-  });
+  .refine(hasWayToSayHello, needsContact);
 export type ConnectionCardInput = z.input<typeof connectionCardSchema>;
 export type ConnectionCard = z.output<typeof connectionCardSchema>;
+
+/** What is stored and sent onward: the guest, without the honeypot or the captcha token. */
+export const guestSchema = guestFields.refine(hasWayToSayHello, needsContact);
+export type Guest = z.output<typeof guestSchema>;
 
 /**
  * Creating a prayer request. `tier` has no default on purpose: the person must choose who sees it.
@@ -124,7 +146,16 @@ export const outboxJobSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('twenty.upsertGuest'),
     idempotencyKey: z.string().min(1).max(200),
-    guest: connectionCardSchema,
+    guest: guestSchema,
+    /** Epoch ms of the first visit; follow-up due dates are measured from here. */
+    visitedAt: z.number().int().nonnegative(),
+    /** Set when the card clearly matched someone we already know: attach, never overwrite. */
+    existingPersonId: z.uuid().nullable(),
+    /** NEEDS_REVIEW creates the Person anyway (so the follow-up is never lost) and asks staff to merge. */
+    dedupe: z.object({
+      status: z.enum(['CLEAR', 'NEEDS_REVIEW']),
+      candidateIds: z.array(z.uuid()),
+    }),
   }),
   z.object({
     kind: z.literal('twenty.createCareRequest'),

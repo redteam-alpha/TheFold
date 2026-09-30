@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { normalizeEmail, normalizePhone } from '@thefold/core';
 import type { PoolClient } from 'pg';
 
 export type ApplyResult = 'APPLIED' | 'STALE';
@@ -46,8 +47,9 @@ export async function upsertPersonRead(
       p.twentyUpdatedAt,
       p.firstName,
       p.lastName,
-      p.emails.map((e) => e.toLowerCase()),
-      p.phones,
+      // Stored normalised so the connection card can find someone by email/phone with an indexed lookup.
+      p.emails.map((e) => normalizeEmail(e) ?? e.trim().toLowerCase()),
+      p.phones.map((x) => normalizePhone(x) ?? x),
       p.isMinor,
       p.sharedEmail,
       p.householdId,

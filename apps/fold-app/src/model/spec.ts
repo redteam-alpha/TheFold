@@ -359,6 +359,7 @@ export const PERSON_FIELDS: readonly ScalarSpec[] = [
     icon: 'IconBellOff',
   },
   { name: 'consentEmail', label: 'OK to email', type: 'BOOLEAN', default: false },
+  { name: 'consentPhone', label: 'OK to call', type: 'BOOLEAN', default: false },
   { name: 'consentSms', label: 'OK to text', type: 'BOOLEAN', default: false },
   { name: 'consentAt', label: 'Consent given', type: 'DATE_TIME' },
   {

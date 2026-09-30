@@ -9,7 +9,7 @@ import {
   TwentyNetworkError,
   unwrapRecords,
 } from '../src/index.js';
-import { FakeTwenty } from './fakeTwenty.js';
+import { FakeTwenty } from '../src/testing/fakeTwenty.js';
 
 const API_KEY = 'sk_live_super_secret_key';
 

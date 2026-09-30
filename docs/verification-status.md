@@ -43,11 +43,29 @@ and Node 22 (the SDK asks for Node 24.5), so nothing here has run against a live
 | Read models apply only newer data (late/duplicate/out-of-order updates cannot roll back) | ✅ | same |
 | Prayer text encrypted at rest, bound to its tenant/record; care-path reads and denials audited; text never in the Twenty-bound job | ✅ | `prayer.test.ts`, `envelope.test.ts` |
 
+### The vertical slice (connection card → guest → welcomer → follow-ups), on real PostgreSQL
+
+Wired together in `apps/community-api/src/{intake,workers,twenty}` and tested end to end with an in-memory Twenty that can fail on demand
+(`test/welcome-slice.test.ts`) and, separately, the REST gateway against the fake Twenty (`test/rest-gateway.test.ts`).
+
+| Behaviour | Status |
+|---|---|
+| A card becomes a guest, an attendance and three follow-ups (48h / 7d / 21d) with **one** owner | ✅ (🟡 for the Twenty side: shapes ❓ until M0) |
+| A double-tapped Submit or refresh creates one guest, however the email is formatted | ✅ |
+| Six guests spread evenly over three welcomers; capacity and "away" respected; nobody left ownerless (pool fallback is audited) | ✅ |
+| A family is welcomed once through one person; children are minors, parent-managed, never contacted | ✅ |
+| A guest who did not consent to contact is recorded but no one is asked to call | ✅ |
+| A known member is attached, not duplicated, and gets no welcome sequence; a guest returning in two days is not duplicated (write-through to the read model) | ✅ |
+| A transient Twenty outage retries with backoff and ends with exactly one of everything | ✅ |
+| A response lost *after* Twenty applied the write creates no second guest and no second assignment (follow-on rows commit atomically with "job done") | ✅ |
+| Honeypot and captcha token are validated then never stored; emails padded with spaces or left empty (mobile keyboards) are accepted | ✅ |
+| Escalation sweep (remind at 36h, notify the lead at 72h) | ⏳ the rules are tested in `packages/core`; the sweep needs follow-up state mirrored from Twenty |
+
 ## 3. Twenty SDK and packaging (types and validators, no server)
 
 | Item | Status | Evidence |
 |---|---|---|
-| The app's 68 entities (10 objects, 36 Person fields, 7+1 roles, 6 views, 7 nav items…) pass the SDK's own `define*` validators with no warnings | ✅ | `apps/fold-app/test/model.test.ts` runs the real validators from `twenty-sdk@2.43.0` |
+| The app's 69 entities (10 objects, 37 Person fields, 7+1 roles, 6 views, 7 nav items…) pass the SDK's own `define*` validators with no warnings | ✅ | `apps/fold-app/test/model.test.ts` runs the real validators from `twenty-sdk@2.43.0` |
 | Types check against the shipped SDK declarations | ✅ | `tsc` on `apps/fold-app` |
 | All identifiers unique and valid UUID v4 (the scaffold's `AGENTS.md` requires v4) | ✅ | `model.test.ts` |
 | Relations are declared once and generated on both sides; each side points at the other | ✅ | `model.test.ts` |
@@ -70,6 +88,7 @@ Each row names the harness check and the **one place** in our code that changes 
 | `sourceRef` uniqueness (`isUnique`) holds on custom objects and on Person | ❓ | `sourceref-idempotent` | `scalarField` in `apps/fold-app/src/model/build.ts` |
 | SELECT defaults written as `"'OPEN'"` apply as intended (not stored with quotes) | ❓ | `select-defaults` | `scalarField` (SELECT case) |
 | `defineField` can extend the standard Person object; self-relations on Person work | ❓ | `app-installed`; manual `self-relations` | `personFieldConfigs`, `RELATIONS` |
+| Person accepts composite `emails`/`phones` payloads and relations set through `<field>Id` (`householdId`, `guardianId`) | ❓ (🟡 against the fake) | `person-shapes` | `RestTwentyGateway` in `apps/community-api/src/twenty/gateway.ts` |
 | Batch endpoint `/rest/batch/<plural>` and its 60-record limit | ❓ | `batch-limit-and-paging`, `batch-61` | `MAX_BATCH` / `batchCreate` |
 | Cloud API limit ≈ 100 requests/minute; **self-host limit unknown** | ❓ | `rate-limit` (opt-in) | `DEFAULT_BUCKET` in `bucket.ts` |
 | Webhook headers `X-Twenty-Webhook-Signature` / `-Timestamp`; HMAC-SHA256 over `"<timestamp>.<body>"`; timestamp unit | ❓ | `webhook-signature` (opt-in) | `defaultSignedPayload` in `webhook.ts` — nothing else |
@@ -86,7 +105,6 @@ Each row names the harness check and the **one place** in our code that changes 
 | Item | Status |
 |---|---|
 | HTTP API, worker processes, member portal UI | ⏳ (`apps/portal-web` and the API/worker entrypoints are not started) |
-| Connection-card → welcomer → follow-up vertical slice | ⏳ (all its parts exist and are tested; the wiring does not) |
 | Email delivery, unsubscribe/bounce handling, DSAR export/erase | ⏳ |
 | Provisioner (workspace/cell creation) | ⏳ (blocked on the M0 answers above) |
 | CLA enforcement in CI | ⏳ (`CLA.md` is a draft awaiting counsel) |

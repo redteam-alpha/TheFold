@@ -71,7 +71,17 @@ describe('the app, as the Twenty SDK sees it', () => {
   });
 
   it('every entity passes the SDK’s own validation, with no warnings', () => {
-    expect(entities.length).toBe(68);
+    // application + objects + Person fields + roles (+ the minimal app role) + views + nav items (+ the folder)
+    const expectedFiles =
+      1 +
+      OBJECT_KEYS.length +
+      personFieldConfigs().length +
+      ROLE_SPECS.length +
+      1 +
+      VIEW_SPECS.length +
+      VIEW_SPECS.length +
+      1;
+    expect(entities.length).toBe(expectedFiles);
     const failing = entities
       .filter((e) => !e.result.success)
       .map((e) => `${e.file}: ${e.result.errors.join('; ')}`);

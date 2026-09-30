@@ -218,6 +218,62 @@ const CHECKS: { id: string; title: string; run: Check }[] = [
     },
   },
   {
+    id: 'person-shapes',
+    title:
+      'Person accepts composite emails/phones and relations set through <field>Id (household, guardian), and they read back',
+    run: async (ctx) => {
+      const made: [string, string][] = [];
+      try {
+        const email = `m0-${ctx.runId}@example.com`;
+        const household = await ctx.client.createRecord('households', {
+          name: `M0 ${ctx.runId} household`,
+          sourceRef: `m0:${ctx.runId}:hh`,
+        });
+        made.push(['households', household.id]);
+        const parent = await ctx.client.createRecord('people', {
+          name: { firstName: 'M0', lastName: ctx.runId },
+          emails: { primaryEmail: email },
+          phones: { primaryPhoneNumber: '+15551230000' },
+          householdId: household.id,
+          sourceRef: `m0:${ctx.runId}:parent`,
+        });
+        made.push(['people', parent.id]);
+        const child = await ctx.client.createRecord('people', {
+          name: { firstName: 'M0kid', lastName: ctx.runId },
+          isMinor: true,
+          guardianId: parent.id,
+          householdId: household.id,
+          sourceRef: `m0:${ctx.runId}:child`,
+        });
+        made.push(['people', child.id]);
+
+        const backParent = await ctx.client.findBySourceRef('people', `m0:${ctx.runId}:parent`);
+        const backChild = await ctx.client.findBySourceRef('people', `m0:${ctx.runId}:child`);
+        const problems: string[] = [];
+        const emails = backParent?.['emails'] as { primaryEmail?: string } | undefined;
+        const phones = backParent?.['phones'] as { primaryPhoneNumber?: string } | undefined;
+        if (emails?.primaryEmail !== email)
+          problems.push(`emails.primaryEmail read back as ${JSON.stringify(emails)}`);
+        if (!String(phones?.primaryPhoneNumber ?? '').includes('5551230000'))
+          problems.push(`phones.primaryPhoneNumber read back as ${JSON.stringify(phones)}`);
+        if (backParent?.['householdId'] !== household.id)
+          problems.push(
+            `householdId read back as ${JSON.stringify(backParent?.['householdId'])} (relations may not be settable through <field>Id)`,
+          );
+        if (backChild?.['guardianId'] !== parent.id)
+          problems.push(
+            `guardianId (a self-relation on Person) read back as ${JSON.stringify(backChild?.['guardianId'])}`,
+          );
+        if (backChild?.['isMinor'] !== true) problems.push('isMinor did not persist');
+        return problems.length === 0
+          ? pass('composite emails/phones and household/guardian relations round-trip')
+          : fail(problems.join('; '));
+      } finally {
+        for (const [plural, id] of made.reverse()) await ctx.client.deleteRecord(plural, id);
+      }
+    },
+  },
+  {
     id: 'batch-limit-and-paging',
     title:
       'Batch create accepts 60, and pagination + updatedAt filter walk 61 records exactly once',
@@ -447,7 +503,7 @@ export const MANUAL_CHECKS: Omit<CheckResult, 'status'>[] = [
     id: 'app-install',
     title: 'The app builds and installs with the pinned SDK on Node 24',
     detail:
-      'In apps/fold-app run: yarn twenty remote:add, yarn twenty dev:build, yarn twenty app:install. Confirm 10 objects, 36 Person fields, 8 roles (7 plus the minimal app role), 6 views and the "The Fold" navigation folder appear.',
+      'In apps/fold-app run: yarn twenty remote:add, yarn twenty dev:build, yarn twenty app:install. Confirm every object, Person field, role and view from apps/fold-app/src/model appears, and the "The Fold" navigation folder is in the sidebar.',
   },
   {
     id: 'self-relations',

@@ -21,7 +21,7 @@ Shell state does not persist between tool calls: re-`eval` the dev-pg line in ea
   digests). Relative imports only (enforced by ESLint). Dates are `YYYY-MM-DD` calendar days.
 - `packages/shared` — zod contracts and the `universalIdentifier` registry for the Twenty app.
 - `packages/twenty-client` — the only code that talks to Twenty's API (rate limit, batching, backoff, HMAC) and the M0 harness (`src/m0`).
-- `apps/community-api` — SQL migrations with row-level security, outbox/inbox, workers.
+- `apps/community-api` — SQL migrations with row-level security, outbox/inbox, the intake → welcomer → follow-up flow (`src/intake`, `src/workers`), and the `TwentyGateway` port (`src/twenty`) that isolates every Twenty write.
 - `apps/fold-app` — the Twenty app. The model is plain data in `src/model/spec.ts`; entity files are one-liners the SDK discovers, and a test fails if they drift from the model.
 
 ## Rules that are not negotiable

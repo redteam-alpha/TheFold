@@ -46,6 +46,24 @@ describe('connectionCardSchema', () => {
     expect(connectionCardSchema.safeParse({ ...noEmail, phone: '   ' }).success).toBe(false);
   });
 
+  it('accepts the emails real phones produce: padded with spaces, or left empty when a phone number is given', () => {
+    const padded = connectionCardSchema.safeParse({ ...base, email: '  sam@example.com  ' });
+    expect(padded.success).toBe(true);
+    if (padded.success) expect(padded.data.email).toBe('sam@example.com');
+
+    const emptyEmail = connectionCardSchema.safeParse({
+      ...base,
+      email: '',
+      phone: '555-123-4567',
+    });
+    expect(emptyEmail.success).toBe(true);
+    if (emptyEmail.success) expect(emptyEmail.data.email).toBeUndefined();
+
+    // ...but an empty email with no phone is still "no way to say hello".
+    expect(connectionCardSchema.safeParse({ ...base, email: '   ' }).success).toBe(false);
+    expect(connectionCardSchema.safeParse({ ...base, email: 'not an email' }).success).toBe(false);
+  });
+
   it('rejects a filled honeypot (bots), bad emails, and oversized household lists', () => {
     expect(
       connectionCardSchema.safeParse({ ...base, website: 'http://spam.example' }).success,

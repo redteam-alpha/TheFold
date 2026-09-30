@@ -12,6 +12,7 @@
   "dependencies": {
     "@thefold/core": "workspace:*",
     "@thefold/shared": "workspace:*",
+    "@thefold/twenty-client": "workspace:*",
     "pg": "^8.23.0"
   },
   "devDependencies": {

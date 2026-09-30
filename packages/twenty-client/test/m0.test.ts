@@ -9,7 +9,7 @@ import {
   TwentyClient,
   type CheckResult,
 } from '../src/index.js';
-import { FAKE_MODEL, FakeTwenty, type FakeQuirks } from './fakeTwenty.js';
+import { FAKE_MODEL, FakeTwenty, type FakeQuirks } from '../src/testing/fakeTwenty.js';
 
 async function run(quirks: FakeQuirks = {}, env: Record<string, string | undefined> = {}) {
   const server = new FakeTwenty(quirks);
@@ -48,6 +48,7 @@ describe('M0 harness', () => {
       'app-installed',
       'sourceref-idempotent',
       'select-defaults',
+      'person-shapes',
       'batch-limit-and-paging',
     ]) {
       expect(byId[id], id).toMatchObject({ status: 'PASS' });
@@ -85,6 +86,52 @@ describe('M0 harness', () => {
       const { byId } = await run({ quotedDefaults: true });
       expect(byId['select-defaults']?.status).toBe('FAIL');
       expect(byId['select-defaults']?.detail).toMatch(/quotes|"OPEN"/);
+    });
+
+    it('detects a server that drops relation ids or composite fields on Person', async () => {
+      const server = new FakeTwenty();
+      const strip: typeof fetch = (input, init) => {
+        if (
+          typeof init?.body === 'string' &&
+          (typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input.url
+          ).includes('/rest/people')
+        ) {
+          const body = JSON.parse(init.body) as Record<string, unknown>;
+          delete body['householdId'];
+          delete body['guardianId'];
+          return server.fetch(input, { ...init, body: JSON.stringify(body) });
+        }
+        return server.fetch(input, init);
+      };
+      const bucket = new TokenBucket({
+        capacity: 10_000,
+        refillPerSecond: 10_000,
+        backgroundReserve: 0,
+        now: Date.now,
+      });
+      const client = new TwentyClient({
+        baseUrl: 'https://twenty.test',
+        apiKey: 'k',
+        fetch: strip,
+        bucket,
+        retry: { sleep: () => Promise.resolve(), random: () => 0 },
+      });
+      const results = await runM0({
+        client,
+        baseUrl: 'https://twenty.test',
+        apiKey: 'k',
+        fetch: strip,
+        model: FAKE_MODEL,
+        env: {},
+        runId: 'strip',
+      });
+      const shapes = results.find((r) => r.id === 'person-shapes');
+      expect(shapes?.status).toBe('FAIL');
+      expect(shapes?.detail).toMatch(/householdId|guardianId/);
     });
 
     it('detects an install where Person’s extension fields are missing', async () => {
