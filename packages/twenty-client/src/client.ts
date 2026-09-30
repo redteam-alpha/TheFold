@@ -178,6 +178,18 @@ export class TwentyClient {
     return updated;
   }
 
+  /** `DELETE /rest/<plural>/<id>` (Twenty soft-deletes). Safe to repeat. */
+  async deleteRecord(plural: string, id: string, priority?: Priority): Promise<void> {
+    assertPlural(plural);
+    if (!RECORD_ID.test(id)) throw new TypeError('invalid record id');
+    try {
+      await this.request('DELETE', `/rest/${plural}/${id}`, { priority });
+    } catch (error) {
+      if (error instanceof TwentyHttpError && error.status === 404) return; // already gone
+      throw error;
+    }
+  }
+
   /**
    * Creates a record exactly once for a given `sourceRef`, even when responses are lost.
    *

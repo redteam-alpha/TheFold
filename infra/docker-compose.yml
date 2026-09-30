@@ -1,0 +1,111 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Local development / M0 stack: an UNMODIFIED, pinned Twenty plus the community database.
+# (ADR 0001: The Fold never patches Twenty. Twenty's own compose file is the reference for these settings.)
+#
+#   cp infra/.env.example infra/.env   # then fill in the two secrets
+#   docker compose -f infra/docker-compose.yml --env-file infra/.env up -d
+#
+# The community API and member portal have no runtime entrypoint yet; they join this file when they do.
+name: thefold
+
+services:
+  twenty-server:
+    image: twentycrm/twenty:${TWENTY_TAG:-v2.43.0}
+    ports:
+      - "${TWENTY_PORT:-3000}:3000"
+    volumes:
+      - twenty-local-data:/app/packages/twenty-server/.local-storage
+    environment:
+      NODE_PORT: 3000
+      PG_DATABASE_URL: postgres://postgres:${TWENTY_DB_PASSWORD:?set TWENTY_DB_PASSWORD}@twenty-db:5432/default
+      SERVER_URL: ${SERVER_URL:-http://localhost:3000}
+      REDIS_URL: redis://twenty-redis:6379
+      STORAGE_TYPE: local
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY (openssl rand -base64 32)}
+      # Deliberately NOT set: ENTERPRISE_KEY. The Fold must work without it (docs/enterprise-avoid.md).
+      # Deliberately NOT set: LOGIC_FUNCTION_TYPE / CODE_INTERPRETER_TYPE. They default to DISABLED in
+      # production and The Fold uses no logic functions (ADR 0001).
+      # IS_MULTIWORKSPACE_ENABLED=true is an M0 experiment (ADR 0002), not the default.
+      IS_MULTIWORKSPACE_ENABLED: ${IS_MULTIWORKSPACE_ENABLED:-false}
+      EMAIL_DRIVER: smtp
+      EMAIL_SMTP_HOST: mailpit
+      EMAIL_SMTP_PORT: 1025
+    depends_on:
+      twenty-db:
+        condition: service_healthy
+      twenty-redis:
+        condition: service_healthy
+    healthcheck:
+      test: curl --fail http://localhost:3000/healthz
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  twenty-worker:
+    image: twentycrm/twenty:${TWENTY_TAG:-v2.43.0}
+    command: ["yarn", "worker:prod"]
+    volumes:
+      - twenty-local-data:/app/packages/twenty-server/.local-storage
+    environment:
+      PG_DATABASE_URL: postgres://postgres:${TWENTY_DB_PASSWORD:?set TWENTY_DB_PASSWORD}@twenty-db:5432/default
+      SERVER_URL: ${SERVER_URL:-http://localhost:3000}
+      REDIS_URL: redis://twenty-redis:6379
+      DISABLE_DB_MIGRATIONS: "true" # the server runs them
+      DISABLE_CRON_JOBS_REGISTRATION: "true"
+      STORAGE_TYPE: local
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY (openssl rand -base64 32)}
+    depends_on:
+      twenty-server:
+        condition: service_healthy
+
+  twenty-db:
+    image: postgres:16
+    volumes:
+      - twenty-db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: default
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${TWENTY_DB_PASSWORD:?set TWENTY_DB_PASSWORD}
+    healthcheck:
+      test: pg_isready -U postgres -h localhost -d default
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  twenty-redis:
+    image: redis:7
+    command: ["--maxmemory-policy", "noeviction"] # Twenty requires noeviction
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # The community service's own database (tenant-isolated with row-level security; see apps/community-api/db).
+  community-db:
+    image: postgres:16
+    ports:
+      - "${COMMUNITY_DB_PORT:-54330}:5432"
+    volumes:
+      - community-db-data:/var/lib/postgresql/data
+      - ../apps/community-api/db/roles.sql:/docker-entrypoint-initdb.d/00-roles.sql:ro
+    environment:
+      POSTGRES_DB: community
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${COMMUNITY_DB_PASSWORD:?set COMMUNITY_DB_PASSWORD}
+    healthcheck:
+      test: pg_isready -U postgres -h localhost -d community
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Catches every email in development. Nothing ever leaves this machine.
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+
+volumes:
+  twenty-db-data:
+  twenty-local-data:
+  community-db-data:

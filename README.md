@@ -20,10 +20,20 @@ The platform won't create belonging by itself. It gives a church the tools to pr
 
 ## Status
 
-Early scaffold (milestones M0–M1 of the plan in [`docs/`](docs)). What exists today:
+Early build (milestones M0–M1 of the plan). **Nothing here has run against a live Twenty yet** — see
+[`docs/verification-status.md`](docs/verification-status.md) for exactly what is verified, what is only tested against a
+stand-in, and what is still an assumption.
 
-- `packages/core` — the pure domain logic, fully tested: drift detection, welcomer assignment, follow-up escalation, identity matching, prayer-request visibility, notification digests.
-- `packages/shared`, `packages/twenty-client`, `apps/community-api`, `apps/fold-app` — see each directory's notes and `docs/verification-status.md` for what is and is not verified against a real Twenty instance.
+| Part | What exists |
+|---|---|
+| `packages/core` | The rules that decide how people are treated, dependency-free and heavily tested: baseline-relative drift detection (no scores, nothing sent to the person), welcomer assignment, follow-up escalation, identity matching, prayer-request visibility, notification digests |
+| `packages/shared` | Stable Twenty identifiers (valid UUID v4, pinned by test) and validated contracts that encode the safety rules |
+| `apps/community-api` | PostgreSQL with tenant row-level security, the Twenty sync pipeline (outbox, webhook inbox, read models), envelope-encrypted care storage, tested on a real PostgreSQL 16 |
+| `packages/twenty-client` | Rate-limited, retry-safe, idempotent access to Twenty, and the **M0 harness** that checks our assumptions against a real instance |
+| `apps/fold-app` | The Twenty app: 10 objects, 36 Person fields, roles (care metadata visible only to the care team, pastors and admins), views and navigation, validated by the SDK's own validators |
+| `infra/` | Pinned, unmodified Twenty + the community database; refuses to start without its secrets |
+
+Not built yet: the HTTP API and workers, the member portal, email, and the provisioner.
 
 ## Architecture in one picture
 
@@ -47,10 +57,13 @@ Requires Node ≥ 22.12 (24 recommended, see `.nvmrc`) and pnpm 10.
 
 ```sh
 pnpm install
-pnpm check          # SPDX headers, lint, typecheck, tests
+pnpm check          # SPDX headers, dependency licenses, lint, typecheck, tests
 ```
 
-Database tests need PostgreSQL 16: `scripts/dev-pg.sh start` prints the environment variables to export.
+Database tests need PostgreSQL 16 and are skipped without it. `eval "$(scripts/dev-pg.sh start)"` starts a throwaway
+local cluster and exports `FOLD_TEST_ADMIN_URL`; set `FOLD_REQUIRE_DB=1` to make a missing database a failure (CI does).
+
+To verify the Twenty assumptions against a real instance, follow [`infra/README.md`](infra/README.md).
 
 ## Principles (please read before contributing)
 

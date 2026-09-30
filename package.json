@@ -3,19 +3,21 @@
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
-  "description": "The Fold — where people are welcomed, known, and connected. A church CRM and community network built on Twenty.",
+  "description": "The Fold \u2014 where people are welcomed, known, and connected. A church CRM and community network built on Twenty.",
   "packageManager": "pnpm@10.33.0",
   "engines": {
     "node": ">=22.12"
   },
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "pnpm -r --if-present run typecheck",
-    "test": "pnpm -r --if-present run test",
+    "typecheck": "pnpm -r --if-present run typecheck && tsc -p scripts/tsconfig.json",
+    "test": "pnpm -r --if-present run test && vitest run --root scripts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:spdx": "node scripts/check-spdx.mjs",
-    "check": "pnpm check:spdx && pnpm lint && pnpm typecheck && pnpm test"
+    "check": "pnpm check:spdx && pnpm check:licenses && pnpm lint && pnpm typecheck && pnpm test",
+    "m0": "tsx scripts/m0/run.ts",
+    "check:licenses": "tsx scripts/check-licenses.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
@@ -24,6 +26,7 @@
     "fast-check": "^4.10.2",
     "globals": "^16.0.0",
     "prettier": "^3.9.9",
+    "tsx": "^4.20.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.71.0",
     "vitest": "^5.0.2"

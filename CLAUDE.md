@@ -7,19 +7,22 @@ Read `README.md`, `docs/adr/`, `docs/privacy-and-safety.md` and `docs/verificati
 
 ```sh
 pnpm install
-pnpm check                 # SPDX headers + lint + typecheck + tests (what CI runs)
+pnpm check                 # SPDX + licenses + lint + typecheck + tests (what CI runs)
 pnpm lint | pnpm typecheck | pnpm test
-scripts/dev-pg.sh start    # ephemeral Postgres 16 for DB tests; prints env vars to export
+eval "$(scripts/dev-pg.sh start)"   # ephemeral Postgres 16 for DB tests (sets FOLD_TEST_ADMIN_URL)
+FOLD_REQUIRE_DB=1 pnpm test         # make a missing database a failure instead of a skip
+pnpm m0                    # verify Twenty assumptions against a live instance (infra/README.md)
 ```
+Shell state does not persist between tool calls: re-`eval` the dev-pg line in each command that needs the database.
 
 ## Layout
 
 - `packages/core` — **dependency-free** domain rules (drift, welcomer, escalation, identity, prayer visibility,
   digests). Relative imports only (enforced by ESLint). Dates are `YYYY-MM-DD` calendar days.
 - `packages/shared` — zod contracts and the `universalIdentifier` registry for the Twenty app.
-- `packages/twenty-client` — the only code that talks to Twenty's API (rate limit, batching, backoff, HMAC).
+- `packages/twenty-client` — the only code that talks to Twenty's API (rate limit, batching, backoff, HMAC) and the M0 harness (`src/m0`).
 - `apps/community-api` — SQL migrations with row-level security, outbox/inbox, workers.
-- `apps/fold-app` — the Twenty app definitions (objects, fields, views, roles).
+- `apps/fold-app` — the Twenty app. The model is plain data in `src/model/spec.ts`; entity files are one-liners the SDK discovers, and a test fails if they drift from the model.
 
 ## Rules that are not negotiable
 

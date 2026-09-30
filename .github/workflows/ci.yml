@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, typecheck, unit tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: SPDX headers
+        run: pnpm check:spdx
+      - name: Dependency licenses
+        run: pnpm check:licenses
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test # database tests skip here; they run in the next job
+
+  database:
+    name: Database tests (PostgreSQL 16, row-level security)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      FOLD_TEST_ADMIN_URL: postgres://postgres@localhost:5432/postgres
+      # A missing database is a failure here, never a silent skip.
+      FOLD_REQUIRE_DB: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @thefold/community-api test
+
+  compose:
+    name: Compose file is valid
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker compose config
+        env:
+          TWENTY_DB_PASSWORD: ci
+          ENCRYPTION_KEY: ci
+          COMMUNITY_DB_PASSWORD: ci
+        run: docker compose -f infra/docker-compose.yml config -q
+      - name: Refuses to start without secrets (no default passwords)
+        run: |
+          if docker compose -f infra/docker-compose.yml config -q 2>/dev/null; then
+            echo "compose must require its secrets"; exit 1
+          fi
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
