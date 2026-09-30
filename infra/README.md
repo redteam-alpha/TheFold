@@ -23,11 +23,15 @@ headless machine the key is also how the CLI signs in, since `remote:add` would 
 nvm use                                  # .nvmrc = 24
 export FOLD_M0_API_KEY=...               # the key you just created
 cd apps/fold-app
-npx twenty remote:add --url http://localhost:3000 --api-key "$FOLD_M0_API_KEY" --as local
+npx twenty remote:add --url http://localhost:3000 --api-key "$FOLD_M0_API_KEY" --as thefold
 npx twenty remote:status                 # confirm it is signed in
 npx twenty plan                          # preview only: read what it will create
 npx twenty apply --no-delete             # --no-delete: never remove anything that is not in our source
 ```
+
+Do **not** name the remote `local`. That is the CLI's built-in remote (`http://localhost:2020`, where its own `docker:start` container would run), and
+when `--as` names an existing remote, `remote:add` re-authenticates it with its stored URL and **ignores `--url`**. You then get `Cannot connect to
+Twenty server` followed by `Authentication failed` even though your server is fine.
 
 Do **not** use `app:install` for this. In `twenty-sdk@2.43.0` it installs an app that has already been *deployed* (published); `plan`/`apply` are the
 path for local source, and `twenty dev` is the same thing in watch mode.

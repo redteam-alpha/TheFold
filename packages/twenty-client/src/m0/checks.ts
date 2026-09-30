@@ -503,7 +503,7 @@ export const MANUAL_CHECKS: Omit<CheckResult, 'status'>[] = [
     id: 'app-install',
     title: 'The app builds and installs with the pinned SDK on Node 24',
     detail:
-      'In apps/fold-app run: npx twenty remote:add --url <server> --api-key <key> --as local, then npx twenty plan (preview only) and npx twenty apply. (app:install is for a published app, not for local source.) Confirm every object, Person field, role and view from apps/fold-app/src/model appears, and the "The Fold" navigation folder is in the sidebar.',
+      'In apps/fold-app run: npx twenty remote:add --url <server> --api-key <key> --as thefold (not "local": that is the built-in remote of the CLI and it ignores --url), then npx twenty plan (preview only) and npx twenty apply. (app:install is for a published app, not for local source.) Confirm every object, Person field, role and view from apps/fold-app/src/model appears, and the "The Fold" navigation folder is in the sidebar.',
   },
   {
     id: 'self-relations',
