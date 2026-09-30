@@ -1,0 +1,15 @@
+{
+  "name": "@thefold/twenty-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "description": "The only code that talks to Twenty's API: rate limiting, batching, retries, pagination, idempotent upserts and webhook signature checks.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  }
+}

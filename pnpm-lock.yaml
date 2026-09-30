@@ -63,6 +63,8 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  packages/twenty-client: {}
+
 packages:
 
   '@eslint-community/eslint-utils@4.10.1':
