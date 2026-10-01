@@ -22,7 +22,9 @@ import {
  *   SKIP    not attempted (an opt-in check was not enabled)
  *   MANUAL  cannot be automated through the API; `detail` lists the steps a person must do
  *
- * Every check cleans up after itself. Nothing here is a substitute for reading the result: paste the
+ * Every check cleans up after itself, with `cleanupClient` when there is one (a restricted role usually cannot
+ * delete people), and whatever still cannot be deleted is listed in a `cleanup` row. Nothing here is a substitute
+ * for reading the result: paste the
  * table into docs/verification-status.md with the date and the Twenty version.
  */
 export type CheckStatus = 'PASS' | 'FAIL' | 'INFO' | 'SKIP' | 'MANUAL';
@@ -42,7 +44,13 @@ export interface ModelExpectation {
 }
 
 export interface M0Context {
+  /** The client the checks run as. Use the service-account key to test the least privilege the real services get. */
   client: TwentyClient;
+  /**
+   * A client with enough rights to delete what the checks create; defaults to `client`. The service-account role
+   * deliberately cannot delete people or households, so a run as that role needs an admin client here.
+   */
+  cleanupClient?: TwentyClient;
   baseUrl: string;
   apiKey: string;
   fetch: typeof fetch;
@@ -53,8 +61,18 @@ export interface M0Context {
   log?: (message: string) => void;
 }
 
+/**
+ * Deletes a record a check created, with the cleanup client. It never throws: a refused delete is recorded and
+ * reported in the `cleanup` row, and must not turn a check that passed into one that failed.
+ */
+type RemoveRecord = (
+  plural: string,
+  id: string,
+  priority?: Parameters<TwentyClient['deleteRecord']>[2],
+) => Promise<void>;
+
 type Check = (
-  ctx: Required<Pick<M0Context, 'runId' | 'log'>> & M0Context,
+  ctx: Required<Pick<M0Context, 'runId' | 'log'>> & M0Context & { remove: RemoveRecord },
 ) => Promise<Omit<CheckResult, 'id' | 'title'>>;
 
 const pass = (detail: string) => ({ status: 'PASS' as const, detail });
@@ -177,7 +195,7 @@ const CHECKS: { id: string; title: string; run: Check }[] = [
             )
           : fail(problems.join('; '));
       } finally {
-        for (const id of cleanup) await ctx.client.deleteRecord('followUps', id);
+        for (const id of cleanup) await ctx.remove('followUps', id);
       }
     },
   },
@@ -213,7 +231,7 @@ const CHECKS: { id: string; title: string; run: Check }[] = [
           );
         return problems.length === 0 ? pass('defaults applied') : fail(problems.join('; '));
       } finally {
-        for (const [plural, id] of made) await ctx.client.deleteRecord(plural, id);
+        for (const [plural, id] of made) await ctx.remove(plural, id);
       }
     },
   },
@@ -269,7 +287,7 @@ const CHECKS: { id: string; title: string; run: Check }[] = [
           ? pass('composite emails/phones and household/guardian relations round-trip')
           : fail(problems.join('; '));
       } finally {
-        for (const [plural, id] of made.reverse()) await ctx.client.deleteRecord(plural, id);
+        for (const [plural, id] of made.reverse()) await ctx.remove(plural, id);
       }
     },
   },
@@ -308,7 +326,7 @@ const CHECKS: { id: string; title: string; run: Check }[] = [
               `created ${created.length}; listing saw ${mine.length} of ours (${ids.size} distinct); pages: ${pages.join(', ')}`,
             );
       } finally {
-        for (const r of created) await ctx.client.deleteRecord('attendances', r.id, 'background');
+        for (const r of created) await ctx.remove('attendances', r.id, 'background');
       }
     },
   },
@@ -337,7 +355,7 @@ const CHECKS: { id: string; title: string; run: Check }[] = [
             : fail(String(error));
         }
       } finally {
-        for (const r of made) await ctx.client.deleteRecord('attendances', r.id, 'background');
+        for (const r of made) await ctx.remove('attendances', r.id, 'background');
       }
     },
   },
@@ -458,7 +476,7 @@ const CHECKS: { id: string; title: string; run: Check }[] = [
               `no candidate matched. ${seen}; signature="${sig ?? '?'}"; body starts: ${delivery.body.slice(0, 120)}`,
             );
       } finally {
-        for (const [plural, id] of made.reverse()) await ctx.client.deleteRecord(plural, id);
+        for (const [plural, id] of made.reverse()) await ctx.remove(plural, id);
         await new Promise<void>((r) => server.close(() => r()));
       }
     },
@@ -520,10 +538,26 @@ export const MANUAL_CHECKS: Omit<CheckResult, 'status'>[] = [
 ];
 
 export async function runM0(ctx: M0Context): Promise<CheckResult[]> {
+  const cleanupClient = ctx.cleanupClient ?? ctx.client;
+  const leftBehind: { plural: string; id: string; reason: string }[] = [];
+  const remove: RemoveRecord = async (plural, id, priority) => {
+    try {
+      await cleanupClient.deleteRecord(plural, id, priority);
+    } catch (error) {
+      const reason =
+        error instanceof TwentyHttpError
+          ? `HTTP ${error.status}`
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      leftBehind.push({ plural, id, reason });
+    }
+  };
   const full = {
     ...ctx,
     runId: ctx.runId ?? randomUUID().slice(0, 8),
     log: ctx.log ?? (() => undefined),
+    remove,
   };
   const results: CheckResult[] = [];
   for (const c of CHECKS) {
@@ -539,8 +573,28 @@ export async function runM0(ctx: M0Context): Promise<CheckResult[]> {
       });
     }
   }
+  if (leftBehind.length > 0) results.push(cleanupResult(leftBehind, full.runId));
   for (const m of MANUAL_CHECKS) results.push({ ...m, status: 'MANUAL' });
   return results;
+}
+
+/** Records a run leaves behind when the cleanup key may not delete them: INFO, because it is not an assumption failing. */
+function cleanupResult(
+  left: readonly { plural: string; id: string; reason: string }[],
+  runId: string,
+): CheckResult {
+  const shown = left.slice(0, 10).map((r) => `${r.plural}/${r.id} (${r.reason})`);
+  const more = left.length > shown.length ? ` and ${left.length - shown.length} more` : '';
+  return {
+    id: 'cleanup',
+    title: 'Test records this run could not delete',
+    status: 'INFO',
+    detail:
+      `${left.length} record(s) were left behind: ${shown.join(', ')}${more}. They belong to run ${runId} ` +
+      'and are safe to delete in Twenty. To avoid this, run again with FOLD_M0_ADMIN_API_KEY set to an ' +
+      'admin key: the checks then run as FOLD_M0_API_KEY (the least-privilege role under test) and only ' +
+      'the cleanup uses the admin key.',
+  };
 }
 
 /**
@@ -551,7 +605,10 @@ export async function runM0(ctx: M0Context): Promise<CheckResult[]> {
  * Details come from a server's responses and error bodies, so treat them as data.
  */
 export function escapeTableCell(text: string): string {
-  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r\n|\r|\n/g, ' ');
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
+    .replace(/\r\n|\r|\n/g, ' ');
 }
 
 export function renderReport(

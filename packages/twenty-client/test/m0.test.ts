@@ -13,7 +13,11 @@ import {
 } from '../src/index.js';
 import { FAKE_MODEL, FakeTwenty, type FakeQuirks } from '../src/testing/fakeTwenty.js';
 
-async function run(quirks: FakeQuirks = {}, env: Record<string, string | undefined> = {}) {
+async function run(
+  quirks: FakeQuirks = {},
+  env: Record<string, string | undefined> = {},
+  keys: { cleanupKey?: string } = {},
+) {
   const server = new FakeTwenty(quirks);
   const bucket = new TokenBucket({
     capacity: 10_000,
@@ -21,15 +25,18 @@ async function run(quirks: FakeQuirks = {}, env: Record<string, string | undefin
     backgroundReserve: 0,
     now: Date.now,
   });
-  const client = new TwentyClient({
-    baseUrl: 'https://twenty.test',
-    apiKey: 'k',
-    fetch: server.fetch,
-    bucket,
-    retry: { sleep: () => Promise.resolve(), random: () => 0 },
-  });
+  const clientFor = (apiKey: string) =>
+    new TwentyClient({
+      baseUrl: 'https://twenty.test',
+      apiKey,
+      fetch: server.fetch,
+      bucket,
+      retry: { sleep: () => Promise.resolve(), random: () => 0 },
+    });
+  const client = clientFor('k');
   const results = await runM0({
     client,
+    ...(keys.cleanupKey ? { cleanupClient: clientFor(keys.cleanupKey) } : {}),
     baseUrl: 'https://twenty.test',
     apiKey: 'k',
     fetch: server.fetch,
@@ -60,6 +67,52 @@ describe('M0 harness', () => {
     expect(byId['webhook-signature']?.status).toBe('SKIP');
     for (const plural of ['followUps', 'people', 'attendances'])
       expect(server.rows(plural), `left over in ${plural}`).toEqual([]);
+  });
+
+  describe('cleanup when the key may not delete everything (the service-account role)', () => {
+    // The role can soft-delete follow-ups and attendance but not people or households.
+    const restricted: FakeQuirks = {
+      adminOnlyDeletes: { plurals: ['people', 'households'], adminKey: 'admin' },
+    };
+
+    it('does not turn passing checks into failures, and lists what it left behind', async () => {
+      const { byId, results, server } = await run(restricted);
+      for (const id of [
+        'sourceref-idempotent',
+        'select-defaults',
+        'person-shapes',
+        'batch-limit-and-paging',
+      ])
+        expect(byId[id], id).toMatchObject({ status: 'PASS' });
+      expect(server.rows('people').length, 'people really were left behind').toBeGreaterThan(0);
+      const cleanup = byId['cleanup'];
+      expect(cleanup?.status).toBe('INFO');
+      expect(cleanup?.detail).toContain('people/');
+      expect(cleanup?.detail).toContain('households/');
+      expect(cleanup?.detail).toContain('HTTP 403');
+      expect(cleanup?.detail).toContain('FOLD_M0_ADMIN_API_KEY');
+      const ids = results.map((r) => r.id);
+      expect(ids.indexOf('cleanup')).toBeLessThan(ids.indexOf('care-permissions'));
+    });
+
+    it('leaves nothing behind, and adds no row, when a separate admin key does the cleanup', async () => {
+      const { byId, server } = await run(restricted, {}, { cleanupKey: 'admin' });
+      expect(byId['cleanup']).toBeUndefined();
+      for (const plural of ['followUps', 'people', 'households', 'attendances'])
+        expect(server.rows(plural), `left over in ${plural}`).toEqual([]);
+    });
+
+    it('uses the admin key for deletes only, never for the checks themselves', async () => {
+      const { server } = await run(restricted, {}, { cleanupKey: 'admin' });
+      const asAdmin = server.calls.filter((c) => c.authorization === 'Bearer admin');
+      expect(asAdmin.length).toBeGreaterThan(0);
+      expect(asAdmin.filter((c) => c.method !== 'DELETE')).toEqual([]);
+    });
+
+    it('a normal run, where the key may delete everything, adds no cleanup row', async () => {
+      const { byId } = await run();
+      expect(byId['cleanup']).toBeUndefined();
+    });
   });
 
   it('always lists the manual checks with concrete steps', async () => {

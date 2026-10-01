@@ -13,8 +13,21 @@ if (!baseUrl || !apiKey) {
 }
 
 const client = new TwentyClient({ baseUrl, apiKey });
+
+// The checks run as FOLD_M0_API_KEY: use the service-account key to test the least privilege the real services get.
+// That role deliberately cannot delete people or households, so cleanup can use a second, admin key. Without
+// it, whatever the key may not delete is listed in the `cleanup` row of the report.
+const adminKey = process.env['FOLD_M0_ADMIN_API_KEY'];
+const cleanupClient = adminKey ? new TwentyClient({ baseUrl, apiKey: adminKey }) : undefined;
+console.error(
+  cleanupClient
+    ? 'Cleanup uses FOLD_M0_ADMIN_API_KEY; the checks use FOLD_M0_API_KEY.'
+    : 'FOLD_M0_ADMIN_API_KEY is not set: cleanup uses the same key, and a restricted key may leave test records (reported below).',
+);
+
 const results = await runM0({
   client,
+  ...(cleanupClient ? { cleanupClient } : {}),
   baseUrl,
   apiKey,
   fetch,

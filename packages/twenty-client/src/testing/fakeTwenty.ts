@@ -26,6 +26,11 @@ export interface FakeQuirks {
   missingObject?: string;
   /** Reject batches larger than this. */
   maxBatch?: number;
+  /**
+   * DELETE on these collections needs the bearer token `adminKey`; any other key gets 403. Models the
+   * service-account role, which cannot delete people or households.
+   */
+  adminOnlyDeletes?: { plurals: readonly string[]; adminKey: string };
 }
 
 /** The objects/fields a correct install exposes; the M0 test passes the same lists to the harness. */
@@ -110,6 +115,12 @@ export class FakeTwenty {
     }
     const del = /^\/rest\/([A-Za-z0-9]+)\/([0-9a-f-]{36})$/.exec(call.path);
     if (del && call.method === 'DELETE') {
+      const restricted = this.quirks.adminOnlyDeletes;
+      if (
+        restricted?.plurals.includes(del[1] as string) &&
+        call.authorization !== `Bearer ${restricted.adminKey}`
+      )
+        return this.json({ error: 'forbidden' }, 403);
       const rows = this.rows(del[1] as string);
       const i = rows.findIndex((r) => r['id'] === del[2]);
       if (i === -1) return this.json({ error: 'not found' }, 404);
