@@ -113,7 +113,9 @@ Each row names the harness check and the **one place** in our code that changes 
 | `IS_MULTIWORKSPACE_ENABLED` is licensed/allowed for self-hosters | ❓ | manual `multi-workspace` | ADR 0002 (cells vs shared workspaces) |
 | Everything works with **no** enterprise key | ❓ | manual `no-enterprise-key` | `docs/enterprise-avoid.md` |
 | The app works with logic functions and the code interpreter disabled (their production default) | ❓ | manual `logic-functions-off` | none expected: The Fold uses none |
-| Object/field-level roles hide `careRequest` on REST, GraphQL, search, timeline and export | ❓ | manual `care-permissions` | roles in `model/roles.ts`; if any surface leaks, **do not host a real congregation** |
+| A user can sign in with email and password through `getLoginTokenFromCredentials` then `getAuthTokensFromLoginToken` (both on `POST /metadata`) and use the access token as a Bearer token on `/rest` and `/graphql` | ❓ | `care-permissions-api` (needs two test users) | the shapes come from the v2.43.0 generated schema (`twenty-client-sdk`), **not yet seen working live**; `login.ts` is fixed from the real answer |
+| A user without the care role cannot see a `careRequest` over **REST** (list, by id, person with relations, create), **GraphQL**, **global search** or the **timeline** | ❓ | automated `care-permissions-api` (as a Church staff user, with a Care team user as the positive control; nothing is PASS unless every surface was tested) | roles in `model/roles.ts`; if any surface leaks, **do not host a real congregation**. The GraphQL `careRequests` and `search` shapes, and that a timeline entry is created for a care request, are unverified until a run |
+| Same, in the **browser**: sidebar, direct URL `/objects/careRequests`, the search box, the person page's timeline tab, People CSV export | ❓ | manual `care-permissions` (UI only) | roles in `model/roles.ts` |
 | Workflows cannot be used to read objects a role cannot read | ❓ | manual `workflow-bypass` | restrict workflow editing to admins (ADR 0004) |
 
 ## 5. Not built yet
@@ -150,6 +152,9 @@ This is the first run in which every automated check passes **with the least-pri
 role's own soft-deletes (the admin key cleaned up), the objects the harness never touches (care requests, touchpoints, group memberships, event
 registrations, events), the raw-duplicate `sourceRef` rejection, the rate limit, the webhook signature, and every manual check. Do not put a real congregation
 on this instance until `care-permissions` and `workflow-bypass` pass.
+
+Added after this run: the automated `care-permissions-api` check (and `infra/README.md` section 5, the same checks by hand with `curl`). It has not run
+against a real server yet, so it is not in any table above; without the four `FOLD_M0_STAFF_*` / `FOLD_M0_CARE_*` variables it reports `SKIP`.
 
 ### M0 run — 2026-10-01 (second) — Twenty v2.43.0 — as the **service account**, admin key for cleanup — **6 PASS · 1 FAIL · 1 INFO · 2 SKIP · 8 MANUAL**
 

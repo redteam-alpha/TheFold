@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net';
 import type { TwentyClient } from '../client.js';
 import { unwrapRecords, type TwentyRecord } from '../client.js';
 import { TwentyHttpError } from '../errors.js';
+import { careRequestPermissions } from './careChecks.js';
 import {
   defaultSignedPayload,
   SIGNATURE_HEADER,
@@ -67,15 +68,17 @@ export interface M0Context {
  * Deletes a record a check created, with the cleanup client. It never throws: a refused delete is recorded and
  * reported in the `cleanup` row, and must not turn a check that passed into one that failed.
  */
-type RemoveRecord = (
+export type RemoveRecord = (
   plural: string,
   id: string,
   priority?: Parameters<TwentyClient['deleteRecord']>[2],
 ) => Promise<void>;
 
-type Check = (
-  ctx: Required<Pick<M0Context, 'runId' | 'log'>> & M0Context & { remove: RemoveRecord },
-) => Promise<Omit<CheckResult, 'id' | 'title'>>;
+/** What a check is given: the context, with a run id, a logger and the never-throwing `remove`. */
+export type CheckContext = Required<Pick<M0Context, 'runId' | 'log'>> &
+  M0Context & { remove: RemoveRecord };
+export type CheckOutcome = Omit<CheckResult, 'id' | 'title'>;
+type Check = (ctx: CheckContext) => Promise<CheckOutcome>;
 
 const pass = (detail: string) => ({ status: 'PASS' as const, detail });
 const fail = (detail: string) => ({ status: 'FAIL' as const, detail });
@@ -495,6 +498,12 @@ const CHECKS: { id: string; title: string; run: Check }[] = [
       }
     },
   },
+  {
+    id: 'care-permissions-api',
+    title:
+      'A user without the care team role cannot see a care request through REST, GraphQL, global search or the timeline, and cannot create one',
+    run: careRequestPermissions,
+  },
 ];
 
 /** Things that cannot be checked through the API. The steps are the deliverable. */
@@ -507,9 +516,10 @@ export const MANUAL_CHECKS: Omit<CheckResult, 'status'>[] = [
   },
   {
     id: 'care-permissions',
-    title: 'The care-request object is invisible to the wrong roles on every surface',
+    title:
+      'The care-request object is invisible to the wrong roles in the web UI (the API surfaces are the automated care-permissions-api check)',
     detail:
-      'Invite a user, give them the "Church staff" role, then as that user try: /rest/careRequests, the GraphQL careRequests query, global search, a Person record page (timeline), CSV export. Every one must be denied or empty. Repeat as "Care team" (allowed).',
+      'Signed in to the web UI as a "Church staff" user (a private window), with a fake care request in existence: the "Care requests" object is not in the sidebar; its direct URL (/objects/careRequests) is denied or empty; the global search box (Ctrl/Cmd+K) finds nothing for the fake care request; the fake person’s page shows no care request under any tab, including the timeline; exporting People to CSV contains no care data. Repeat as "Care team": they see all of it. The REST, GraphQL, search and timeline calls are checked by care-permissions-api once the test users exist (infra/README.md).',
   },
   {
     id: 'workflow-bypass',
