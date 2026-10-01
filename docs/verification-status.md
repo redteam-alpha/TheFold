@@ -166,8 +166,13 @@ What this does **not** show:
   web app sends was not confirmed.
 - **Other roles.** Pastor, Welcome team lead, Read only and Twenty's built-in roles were not tested.
 
-Also seen: Twenty's two sample workflows, "Quick Lead" (manual) and "Create company when adding a new person" (database event), are **ACTIVE** in
-this workspace. Nobody has decided whether a church workspace should keep them.
+Also seen: Twenty's two sample workflows, "Quick Lead" (manual) and "Create company when adding a new person" (database event), were **ACTIVE** in
+this workspace.
+
+**Deactivated the same day (2026-10-01), on the owner's decision.** `deactivateWorkflowVersion` with the admin API key answered `true` for both;
+each workflow and its one version now read `DEACTIVATED`, and the `person.upserted` automated trigger is gone (the workspace has none). This is
+workspace state, not code: nothing in this repository does it, so a newly created workspace ships with both workflows active again. Turning
+them off is a job for the provisioner (section 5), which is not built yet.
 
 ### M0 run — 2026-10-01 (fifth) — Twenty v2.43.0 — service account, with the two test users — **8 PASS · 0 FAIL · 1 INFO · 2 SKIP · 8 MANUAL**
 
