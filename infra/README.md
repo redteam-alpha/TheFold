@@ -48,9 +48,13 @@ key for the harness, so it runs with the least privilege the real services will 
 
 ## 3. Run the harness
 
+Run it from the **repository root**: `m0` is a root script, and from inside `apps/fold-app` pnpm answers `Command "m0" not found`.
+
 ```sh
+cd ~/TheFold                                     # the repository root
 export FOLD_M0_BASE_URL=http://localhost:3000
 export FOLD_M0_API_KEY=...                       # the service-account key from step 2
+export FOLD_M0_TWENTY_VERSION=v2.43.0            # recorded in the report header (else it says "unknown")
 # Optional, both opt-in:
 export FOLD_M0_RATE_TEST=1                       # sends ~150 GETs to find the rate limit
 export FOLD_M0_WEBHOOK_HOST=host.docker.internal # a name Twenty can reach this machine at

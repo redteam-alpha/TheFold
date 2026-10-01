@@ -77,7 +77,7 @@ Wired together in `apps/community-api/src/{intake,workers,twenty}` and tested en
 | Every dependency has an acceptable license; CAL/SSPL/BUSL etc. are denied | ✅ | `pnpm check:licenses` + `scripts/test/licensePolicy.test.ts` (locally; the CI run of it is below) |
 | Secret scan (gitleaks) finds nothing in the branch | ✅ | `Secret scan` job passed on GitHub Actions (2026-09-30) |
 | Lint, typecheck and unit tests (Node 22 and 24) and the PostgreSQL 16 database tests are green **on GitHub Actions** | ✅ | Green on GitHub Actions for commit `3364a19` (run `36680060596`, 2026-09-30). The first two CI runs failed at setup, before any test ran: `pnpm/action-setup` refused because the pnpm version was declared in both `ci.yml` and `package.json`; removing it from `ci.yml` was the only change needed |
-| The app **installs** with the pinned SDK on **Node 24** | ❓ | M0 manual `app-install` (`npx twenty plan` / `apply`; **not** `app:install`, which installs a published app). The SDK declares `engines: node ^24.5.0`; we only typechecked/validated under Node 22 |
+| The app **installs** with the pinned SDK on **Node 24** | ✅ | Installed on the VM with `twenty-sdk@2.43.0` on Node 24 (`npx twenty apply`, **not** `app:install`, which installs a published app); M0 `app-installed` then found all 10 objects and 37 Person fields (2026-10-01). Views, roles and the sidebar folder have **not** been looked at in the UI yet: the plan listed them as "will be created" |
 
 ## 4. Assumptions about a running Twenty (M0 must answer these)
 
@@ -87,7 +87,7 @@ Each row names the harness check and the **one place** in our code that changes 
 |---|---|---|---|
 | `/healthz` answers, and a bearer API key authenticates against the REST API on a self-hosted `v2.43.0` | ✅ | `health`, `auth-and-rest` (2026-09-30, see the run log) | `TwentyClient` auth/headers |
 | REST **list** response shape on Person: `{data, totalCount, pageInfo}` | ✅ | `auth-and-rest` observed `GET /rest/people` → keys `data, totalCount, pageInfo` | `unwrapRecords`, `nextCursorOf` in `twenty-client/src/client.ts` |
-| REST create/update/delete paths and shapes for **our** objects (`/rest/<plural>`, `{data:{…}}`) | ❓ (🟡 against the fake) | `sourceref-idempotent`, `select-defaults`, `person-shapes`, `batch-limit-and-paging` — **not yet answered**: the first run happened before the app was installed, so each failed with `object '…' not found` | `unwrapRecords`, `nextCursorOf`, `listUpdatedSince` in `twenty-client/src/client.ts` |
+| REST create / list / read-back / delete for **our** objects (`/rest/<plural>`, `{data:{…}}`) | ✅ | `sourceref-idempotent`, `select-defaults`, `person-shapes`, `batch-limit-and-paging` all PASS (2026-10-01) on `followUps`, `households`, `attendances` and `people`. **Update** (PATCH) is not exercised by the harness | `unwrapRecords`, `nextCursorOf`, `listUpdatedSince` in `twenty-client/src/client.ts` |
 | The CLI has `remote:add --url --api-key --as`, `plan` (preview) and `apply [--no-delete]`; `app:install` is described as "Install a **deployed** app" | ✅ | `twenty --help` and `remote:add --help` printed on the real VM (2026-09-30); matches `twenty-sdk@2.43.0` source | `infra/README.md` step 2 |
 | `remote:add --as <existing name>` re-authenticates that remote with its **stored** URL and ignores `--url`; `local` always exists and points at `http://localhost:2020` | ✅ | Observed on the VM: `--as local --url http://localhost:3000` failed with `Cannot connect to Twenty server` while `curl localhost:3000/healthz` was 200 and `remote:list` showed `local  http://localhost:2020  [none]`; explained by the SDK source | use a new name such as `thefold` |
 | `twenty plan` needs the app to be registered already: on a fresh server it fails with `No registration found for "<app id>"` | ✅ | Observed on the VM (2026-09-30) | `infra/README.md` step 2 |
@@ -95,13 +95,15 @@ Each row names the harness check and the **one place** in our code that changes 
 | The app builds and **typechecks** with the pinned SDK on **Node 24** | ✅ | Observed on the VM: `Building application files…` and `Running typecheck…` passed (2026-09-30) | none |
 | Twenty **rejects reserved names** (`address`, `role`, `events`, `event`… 66 in all) on objects and fields; the SDK's own `define*` validators do **not** check this | ✅ | Observed on the VM: 5 of our names rejected. The list was read from `twenty-shared`'s `RESERVED_METADATA_NAME_KEYWORDS` embedded in `twenty-sdk@2.43.0`'s source map (not exported) | `TWENTY_RESERVED_NAMES` in `apps/fold-app/test/model.test.ts` — **refresh on every SDK bump** |
 | A view must reference Person's own fields (`name`, `emails`…) by **Twenty's** ids, never ids derived from our registry | ✅ | Observed on the VM: `People by stage` → `Field metadata not found` for Person `name` | `viewFieldId` in `apps/fold-app/src/model/views.ts` |
-| The server **accepts our model** and installs the app (objects, Person fields, roles, views, navigation) | ❓ | Not yet: the first attempt was rejected for the two causes above; re-run `apply` after `git pull` | `apps/fold-app/src/model`; the server names each entity it rejects |
-| Filter syntax `sourceRef[eq]:"…"`, `updatedAt[gt]:"…"`, `order_by`, `starting_after` | ❓ | `sourceref-idempotent`, `batch-limit-and-paging` | REST adapter section of `client.ts`. **A server that ignores the filter would silently lose data; the harness has a check for exactly that** |
-| `sourceRef` uniqueness (`isUnique`) holds on custom objects and on Person | ❓ | `sourceref-idempotent` | `scalarField` in `apps/fold-app/src/model/build.ts` |
-| SELECT defaults written as `"'OPEN'"` apply as intended (not stored with quotes) | ❓ | `select-defaults` | `scalarField` (SELECT case) |
-| `defineField` can extend the standard Person object; self-relations on Person work | ❓ | `app-installed`; manual `self-relations` | `personFieldConfigs`, `RELATIONS` |
-| Person accepts composite `emails`/`phones` payloads and relations set through `<field>Id` (`householdId`, `guardianId`) | ❓ (🟡 against the fake) | `person-shapes` | `RestTwentyGateway` in `apps/community-api/src/twenty/gateway.ts` |
-| Batch endpoint `/rest/batch/<plural>` and its 60-record limit | ❓ | `batch-limit-and-paging`, `batch-61` | `MAX_BATCH` / `batchCreate` |
+| The server **accepts our model** (after the two fixes above) | ✅ | The corrected model went through `twenty apply`; `app-installed` PASS: 10 objects and 37 Person fields present (2026-10-01). The 22 earlier errors were the two causes recorded above | `apps/fold-app/src/model`; the server names each entity it rejects |
+| Filter syntax `sourceRef[eq]:"…"`, `updatedAt[gt]:"…"` and `starting_after` paging | ✅ | `sourceref-idempotent` (the filter is **not** ignored: an unknown ref finds nothing, distinct refs stay distinct) and `batch-limit-and-paging` (61 records walked exactly once, pages of 60 and 1) (2026-10-01). `order_by` is not asserted separately | REST adapter section of `client.ts` |
+| A raw duplicate create with the same `sourceRef` is **rejected by the database** (`isUnique`) | ❓ | `sourceref-idempotent` only proves lookup-based idempotency (create once, find again). A check that POSTs the same ref twice is **not written yet**; it decides whether two racing workers could create duplicates | `scalarField` in `apps/fold-app/src/model/build.ts`; the single-writer lock |
+| SELECT and BOOLEAN defaults written as `"'OPEN'"` and `false` apply as intended (not stored with quotes) | ✅ | `select-defaults` PASS, on our object and on Person (2026-10-01) | `scalarField` (SELECT case) |
+| `defineField` can extend the standard Person object | ✅ | `app-installed`: all 37 extension fields present on Person (2026-10-01) | `personFieldConfigs` |
+| Self-relations on Person work (`primaryShepherd`/`shepherdedPeople`, `guardian`/`dependents`) | ❓ | manual `self-relations` (the relations were created; the UI behaviour was not checked) | `RELATIONS` |
+| Person accepts composite `emails`/`phones` payloads and relations set through `<field>Id` (`householdId`, `guardianId`) | ✅ | `person-shapes` PASS: they round-trip (2026-10-01) | `RestTwentyGateway` in `apps/community-api/src/twenty/gateway.ts` |
+| Batch endpoint `/rest/batch/<plural>` works in 60-record chunks | ✅ | `batch-limit-and-paging` PASS (2026-10-01) | `MAX_BATCH` / `batchCreate` |
+| The server enforces a 60-record batch limit | ✅ (it does **not**, on `v2.43.0`) | `batch-61` INFO: a batch of **61 was accepted in one request** (2026-10-01). Twenty documents 60, so the client keeps chunking at 60 | `MAX_BATCH` stays 60 on purpose |
 | Cloud API limit ≈ 100 requests/minute; **self-host limit unknown** | ❓ | `rate-limit` (opt-in) | `DEFAULT_BUCKET` in `bucket.ts` |
 | Webhook headers `X-Twenty-Webhook-Signature` / `-Timestamp`; HMAC-SHA256 over `"<timestamp>.<body>"`; timestamp unit | ❓ | `webhook-signature` (opt-in) | `defaultSignedPayload` in `webhook.ts` — nothing else |
 | Webhook payload shape and what a Person merge does to ids/events | ❓ | manual `person-merge` | webhook adapter; `person_alias` handling |
@@ -126,6 +128,27 @@ Each row names the harness check and the **one place** in our code that changes 
 ## 6. M0 run log
 
 Paste each `pnpm m0` table here (newest first) with the date and the Twenty version, and update the ❓ rows above.
+
+### M0 run — 2026-10-01 — Twenty v2.43.0 — `http://localhost:3000` (self-hosted, TrueNAS VM, Node 24) — **app installed; 7 PASS · 0 FAIL · 1 INFO · 2 SKIP · 8 MANUAL**
+
+The report header said `Twenty unknown` because neither `FOLD_M0_TWENTY_VERSION` nor `TWENTY_TAG` was exported; the version is the pinned image tag. The
+role of the API key used was **not recorded** (re-run with the "The Fold service account" key to test least privilege). The harness deletes the records it creates.
+
+| Status | Check | Observed |
+|---|---|---|
+| PASS | `health` | HTTP 200 |
+| PASS | `auth-and-rest` | `GET /rest/people` → keys `data, totalCount, pageInfo` |
+| PASS | `app-installed` | 10 objects and 37 Person fields present |
+| PASS | `sourceref-idempotent` | created once, found again, distinct refs stayed distinct, an unknown ref found nothing |
+| PASS | `select-defaults` | defaults applied |
+| PASS | `person-shapes` | composite emails/phones and household/guardian relations round-trip |
+| PASS | `batch-limit-and-paging` | created 61 in 2 batches; listing returned pages of 60, 1 and saw each record exactly once |
+| INFO | `batch-61` | accepted 61 records in one request; the client still chunks at 60 to be safe |
+| SKIP | `rate-limit`, `webhook-signature` | opt-in checks not enabled |
+| MANUAL | 8 checks | not done: `no-enterprise-key`, `care-permissions`, `workflow-bypass`, `multi-workspace`, `logic-functions-off`, `app-install` (visual), `self-relations`, `person-merge` |
+
+What this does **not** prove: that the database rejects a raw duplicate `sourceRef` (the check exercises lookup-based idempotency only); the rate limit; the
+webhook signature; or any of the privacy checks. Do not put a real congregation on this instance until `care-permissions` and `workflow-bypass` pass.
 
 ### Install attempt — 2026-09-30 — Twenty v2.43.0, `twenty-sdk` 2.43.0, Node 24 — **rejected by the server**
 
