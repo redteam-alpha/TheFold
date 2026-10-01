@@ -96,6 +96,10 @@ at http://localhost:8025):
 1. In Twenty: **Settings → Members → Invite** `staff@fold-test.example`, then `care@fold-test.example`. (Menu names can differ by version.)
 2. Open each invitation from the Mailpit inbox, accept it and **set a password**. Use throwaway passwords: the harness reads them from the
    environment and never prints or logs them, and they must never go into a chat, an issue or the ledger.
+   **No mail in Mailpit?** The worker sends it, so `twenty-worker` needs the `EMAIL_*` settings too (fixed in this compose file; a stack
+   started before that fix needs `git pull` and the `up -d` from step 1, which recreates the worker). Then resend the invitation from the
+   Members page. `docker compose -f infra/docker-compose.yml --env-file infra/.env logs --since 15m twenty-worker | grep -iE 'mail|smtp'`
+   shows what the worker did with it.
 3. **Settings → Roles**: give `staff@…` the **Church staff** role and `care@…` the **Care team** role, and check each has *only* that role.
    A new member may arrive as an admin; an admin can see care requests, and the check would then (correctly) report a leak.
 4. Set the four `FOLD_M0_STAFF_*` / `FOLD_M0_CARE_*` variables as in step 3 and run `pnpm m0`.

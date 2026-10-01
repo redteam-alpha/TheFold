@@ -108,6 +108,7 @@ Each row names the harness check and the **one place** in our code that changes 
 | The server enforces a 60-record batch limit | ✅ (it does **not**, on `v2.43.0`) | `batch-61` INFO: a batch of **61 was accepted in one request** (2026-10-01). Twenty documents 60, so the client keeps chunking at 60 | `MAX_BATCH` stays 60 on purpose |
 | Cloud API limit ≈ 100 requests/minute; **self-host limit unknown** | ❓ | `rate-limit` (opt-in) | `DEFAULT_BUCKET` in `bucket.ts` |
 | Webhook headers `X-Twenty-Webhook-Signature` / `-Timestamp`; HMAC-SHA256 over `"<timestamp>.<body>"`; timestamp unit | ❓ | `webhook-signature` (opt-in) | `defaultSignedPayload` in `webhook.ts` — nothing else |
+| Invitation email reaches Mailpit once the **worker** has the `EMAIL_*` settings (it sends queued email; the server alone is not enough) | ❓ | invite a test member, look in http://localhost:8025 | `infra/docker-compose.yml` (worker environment). Observed 2026-10-01: with the settings on the server only, **no invitation reached Mailpit**. Twenty's own compose file lists `EMAIL_*` on the worker too; the fix is unconfirmed until a mail arrives |
 | Webhook payload shape and what a Person merge does to ids/events | ❓ | manual `person-merge` | webhook adapter; `person_alias` handling |
 | Workspace creation and app install can be scripted | ❓ | manual `multi-workspace` | provisioner (ADR 0002) |
 | `IS_MULTIWORKSPACE_ENABLED` is licensed/allowed for self-hosters | ❓ | manual `multi-workspace` | ADR 0002 (cells vs shared workspaces) |
