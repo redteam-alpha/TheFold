@@ -95,7 +95,7 @@ Each row names the harness check and the **one place** in our code that changes 
 | The app builds and **typechecks** with the pinned SDK on **Node 24** | ✅ | Observed on the VM: `Building application files…` and `Running typecheck…` passed (2026-09-30) | none |
 | Twenty **rejects reserved names** (`address`, `role`, `events`, `event`… 66 in all) on objects and fields; the SDK's own `define*` validators do **not** check this | ✅ | Observed on the VM: 5 of our names rejected. The list was read from `twenty-shared`'s `RESERVED_METADATA_NAME_KEYWORDS` embedded in `twenty-sdk@2.43.0`'s source map (not exported) | `TWENTY_RESERVED_NAMES` in `apps/fold-app/test/model.test.ts` — **refresh on every SDK bump** |
 | A view must reference Person's own fields (`name`, `emails`…) by **Twenty's** ids, never ids derived from our registry | ✅ | Observed on the VM: `People by stage` → `Field metadata not found` for Person `name` | `viewFieldId` in `apps/fold-app/src/model/views.ts` |
-| With the **service-account role**, REST can create and read what the services need: follow-ups (with the `sourceRef` lookup), people with composite emails/phones and relations, households, and batches of attendance | ✅ | Second M0 run, 2026-10-01: `sourceref-idempotent`, `select-defaults`, `person-shapes`, `batch-limit-and-paging` PASS with a service-account key. **Not exercised:** PATCH, the role's own soft-deletes (an admin key cleaned up), and care requests, touchpoints, group memberships, event registrations and events | `service` in `apps/fold-app/src/model/roles.ts` |
+| With the **service-account role**, REST can create and read what the services need: follow-ups (with the `sourceRef` lookup), people with composite emails/phones and relations, households, and batches of attendance | ✅ | Second and third M0 runs, 2026-10-01: `sourceref-idempotent`, `select-defaults`, `person-shapes`, `batch-limit-and-paging` PASS with a service-account key; the third run passes every automated check (`app-installed` read with the admin key). **Not exercised:** PATCH, the role's own soft-deletes (an admin key cleaned up), and care requests, touchpoints, group memberships, event registrations and events | `service` in `apps/fold-app/src/model/roles.ts` |
 | The service-account role **cannot read workspace metadata** (`GET /rest/metadata/objects` → 403) | ✅ | Observed 2026-10-01. Expected least privilege: the services never read metadata; installing and verifying an app is an admin job (`FOLD_M0_ADMIN_API_KEY`) | none |
 | The server **accepts our model** (after the two fixes above) | ✅ | The corrected model went through `twenty apply`; `app-installed` PASS: 10 objects and 37 Person fields present (2026-10-01). The 22 earlier errors were the two causes recorded above | `apps/fold-app/src/model`; the server names each entity it rejects |
 | Filter syntax `sourceRef[eq]:"…"`, `updatedAt[gt]:"…"` and `starting_after` paging | ✅ | `sourceref-idempotent` (the filter is **not** ignored: an unknown ref finds nothing, distinct refs stay distinct) and `batch-limit-and-paging` (61 records walked exactly once, pages of 60 and 1) (2026-10-01). `order_by` is not asserted separately | REST adapter section of `client.ts` |
@@ -131,6 +131,26 @@ Each row names the harness check and the **one place** in our code that changes 
 
 Paste each `pnpm m0` table here (newest first) with the date and the Twenty version, and update the ❓ rows above.
 
+### M0 run — 2026-10-01 (third) — Twenty v2.43.0 — as the **service account**; admin key only for the metadata read and cleanup — **7 PASS · 0 FAIL · 1 INFO · 2 SKIP · 8 MANUAL**
+
+The two keys were created in Twenty as `SERVICE_ACCOUNT_KEY` (role "The Fold service account") and `ADMIN_KEY` (an admin role). The checks ran as the
+first; the second did only the `/rest/metadata/objects` read and the cleanup. The report header now says `Twenty v2.43.0` and there is **no `cleanup`
+row**, so nothing was left behind.
+
+| Status | Check | Observed |
+|---|---|---|
+| PASS | `health`, `auth-and-rest` | HTTP 200; `GET /rest/people` → keys `data, totalCount, pageInfo` |
+| PASS | `app-installed` | 10 objects and 37 Person fields present (read with the admin key) |
+| PASS | `sourceref-idempotent`, `select-defaults`, `person-shapes`, `batch-limit-and-paging` | as in the earlier runs, now as the service account: 61 attendances in 2 batches, defaults applied, composite emails/phones and relations round-trip |
+| INFO | `batch-61` | accepted 61 records in one request |
+| SKIP | `rate-limit`, `webhook-signature` | opt-in checks not enabled |
+| MANUAL | 8 checks | not done |
+
+This is the first run in which every automated check passes **with the least-privilege role the real services will use**. Still not exercised: PATCH, the
+role's own soft-deletes (the admin key cleaned up), the objects the harness never touches (care requests, touchpoints, group memberships, event
+registrations, events), the raw-duplicate `sourceRef` rejection, the rate limit, the webhook signature, and every manual check. Do not put a real congregation
+on this instance until `care-permissions` and `workflow-bypass` pass.
+
 ### M0 run — 2026-10-01 (second) — Twenty v2.43.0 — as the **service account**, admin key for cleanup — **6 PASS · 1 FAIL · 1 INFO · 2 SKIP · 8 MANUAL**
 
 The checks ran as a key with the "The Fold service account" role; `FOLD_M0_ADMIN_API_KEY` (an admin key) did the cleanup, and no `cleanup` row appeared, so nothing was left behind.
@@ -143,7 +163,7 @@ The checks ran as a key with the "The Fold service account" role; `FOLD_M0_ADMIN
 | INFO | `batch-61` | accepted 61 records in one request |
 | SKIP / MANUAL | as before | opt-in checks not enabled; 8 manual checks not done |
 
-The FAIL is **a limit of the key, not of the install**: the service-account role may not read workspace metadata, which is correct least privilege (the real services never need it). The harness used that key for the metadata read; fixed by running that one read, and the cleanup, with the admin client (`adminClient`, `FOLD_M0_ADMIN_API_KEY`). Not exercised by this run: PATCH, the role's own soft-deletes (the admin key did the cleanup), and the objects the harness does not touch (care requests, touchpoints, group memberships, event registrations, events).
+The FAIL is **a limit of the key, not of the install**: the service-account role may not read workspace metadata, which is correct least privilege (the real services never need it). The harness used that key for the metadata read; fixed in `0cfd515` by running that one read, and the cleanup, with the admin client (`adminClient`, `FOLD_M0_ADMIN_API_KEY`). The third run above passes. Not exercised by this run: PATCH, the role's own soft-deletes (the admin key did the cleanup), and the objects the harness does not touch (care requests, touchpoints, group memberships, event registrations, events).
 
 ### M0 run — 2026-10-01 — Twenty v2.43.0 — `http://localhost:3000` (self-hosted, TrueNAS VM, Node 24) — **admin key; app installed; 7 PASS · 0 FAIL · 1 INFO · 2 SKIP · 8 MANUAL**
 
