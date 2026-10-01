@@ -120,7 +120,8 @@ Each row names the harness check and the **one place** in our code that changes 
 | GraphQL `search` (on `/graphql`, not `/metadata`) only tells the roles apart when it names its objects (`includedObjectNameSingulars`) | ✅ over the API; ❓ what the browser's search box does | by hand, 2026-10-01: with **no** object list it is `FORBIDDEN` for the Church staff **and** the Care team user (an admin key gets results). Scoped to `careRequest`: Care team finds the record, Church staff `FORBIDDEN`. Scoped to `person`: both get the person only | `SEARCH_SCOPES` in `careChecks.ts`. If the search box (Ctrl/Cmd+K) does not work for these roles in the browser, that is a usability finding for manual `care-permissions`, not a leak |
 | A "record created" timeline entry points at its record through `target<Object>Id` (`targetCareRequestId`); `linkedRecordId` is null, and the entry is not attached to the person | ✅ | by hand, 2026-10-01: the admin key and the Care team user get the entry with `filter=targetCareRequestId[eq]:"<id>"`; the Church staff user gets `200` with no entry, sees only the person's own "created" entry on the person's timeline, and no care-request entry in an unfiltered listing | `timelineOfCareRequest` in `careChecks.ts` |
 | Same, in the **browser**: sidebar, direct URL `/objects/careRequests`, the search box, the person page's timeline tab, People CSV export | ❓ | manual `care-permissions` (UI only). Also check that the search box **works at all** as each role (see the `search` row above) | roles in `model/roles.ts` |
-| Workflows cannot be used to read objects a role cannot read | ❓ | manual `workflow-bypass` | restrict workflow editing to admins (ADR 0004) |
+| A Church staff or Care team user cannot create, edit, activate or run a workflow, so cannot build one that reads care requests | ✅ over the API; ❓ in the browser | manual `workflow-bypass`, done over the API on 2026-10-01 (run log): every workflow operation tried is refused for the Church staff user, including running Twenty's existing active manual workflow; the Care team user was refused on the ones tried as that user (read, add a step, activate, run). The browser was not used, and the Pastor, Welcome team lead, Read only and Twenty's built-in roles were not tested | roles in `model/roles.ts`: no role grants the workflow objects, and only "Church admin" has settings |
+| A workflow acts with the rights of the user who set it off, not with more | ❓ | **not answered** by the 2026-10-01 attempt: adding a step and running a workflow are refused for the admin **API key** too (`Forbidden resource`), so no "Search records on care requests" workflow could be built to observe, and Twenty's active sample workflow did not fire for a staff-created person. Needs an admin signed in to the browser: build a manual workflow with "Search records" on care requests, run it, then check from the staff side whether its output is reachable | restrict workflow editing to admins (ADR 0004), which is what the roles do today |
 
 ## 5. Not built yet
 
@@ -136,6 +137,37 @@ Each row names the harness check and the **one place** in our code that changes 
 ## 6. M0 run log
 
 Paste each `pnpm m0` table here (newest first) with the date and the Twenty version, and update the ❓ rows above.
+
+### `workflow-bypass` by hand — 2026-10-01 — Twenty v2.43.0 — over the API, as the two test users — **passes as written; the elevated-rights question is open**
+
+The check asks a Church staff user to build a workflow with "Search records" on care requests and run it: "it must fail or return nothing". It failed
+at every step for the Church staff user (signed in as in `infra/README.md` 5.2). The Care team user was tried on reading workflows, adding a step,
+activating and running, and was refused each time. A fake person and care request existed throughout and were deleted afterwards, with the person
+the staff user created; no company, workflow or run was left behind.
+
+| Attempt as Church staff | Answer |
+|---|---|
+| Read `workflows`, `workflowVersions`, `workflowRuns` over REST; versions and runs over GraphQL too | `PERMISSION_DENIED` / `FORBIDDEN` |
+| Create a workflow: REST `POST /rest/workflows`, GraphQL `createWorkflow`, `createCoreWorkflow` | `PERMISSION_DENIED` / `FORBIDDEN` |
+| Add a "Search records" step: `createWorkflowVersionStep` | `FORBIDDEN` |
+| `activateWorkflowVersion` | `FORBIDDEN` |
+| `runWorkflowVersion`, with an impossible id and with the id of Twenty's active manual sample workflow ("Quick Lead") | `FORBIDDEN` |
+| Create a version or a run as a plain record: `createWorkflowVersion`, `createWorkflowRun` | `Method not allowed` |
+| Read `workflowAutomatedTriggers` | **`200`**: the trigger settings of the sample workflow are readable by staff. No care data in them |
+
+What this does **not** show:
+
+- **Whether a workflow acts with more rights than the user who set it off.** `createWorkflowVersionStep`, `runWorkflowVersion` and `coreWorkflows` answer
+  `Forbidden resource` for the admin **API key** as well, so a workflow could not be built or run without an admin signed in to the browser. As a
+  substitute, the staff user (who is refused on `companies`) created a person with an email, to see whether Twenty's active sample workflow "Create
+  company when adding a new person" (trigger `person.upserted`) would create a company on their behalf. No run started within 40 seconds, the
+  workspace has 0 workflow runs in total, and the worker logged nothing about it, so this proved nothing either way.
+- **The browser.** Every answer above is the server's reply to the operation by name on `/graphql` or `/rest`; that these are exactly the calls the
+  web app sends was not confirmed.
+- **Other roles.** Pastor, Welcome team lead, Read only and Twenty's built-in roles were not tested.
+
+Also seen: Twenty's two sample workflows, "Quick Lead" (manual) and "Create company when adding a new person" (database event), are **ACTIVE** in
+this workspace. Nobody has decided whether a church workspace should keep them.
 
 ### M0 run — 2026-10-01 (fifth) — Twenty v2.43.0 — service account, with the two test users — **8 PASS · 0 FAIL · 1 INFO · 2 SKIP · 8 MANUAL**
 
