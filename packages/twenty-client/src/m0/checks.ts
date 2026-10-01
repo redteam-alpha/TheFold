@@ -22,7 +22,7 @@ import {
  *   SKIP    not attempted (an opt-in check was not enabled)
  *   MANUAL  cannot be automated through the API; `detail` lists the steps a person must do
  *
- * Every check cleans up after itself, with `cleanupClient` when there is one (a restricted role usually cannot
+ * Every check cleans up after itself, with `adminClient` when there is one (a restricted role usually cannot
  * delete people), and whatever still cannot be deleted is listed in a `cleanup` row. Nothing here is a substitute
  * for reading the result: paste the
  * table into docs/verification-status.md with the date and the Twenty version.
@@ -47,10 +47,12 @@ export interface M0Context {
   /** The client the checks run as. Use the service-account key to test the least privilege the real services get. */
   client: TwentyClient;
   /**
-   * A client with enough rights to delete what the checks create; defaults to `client`. The service-account role
-   * deliberately cannot delete people or households, so a run as that role needs an admin client here.
+   * An admin client, used ONLY for what a least-privilege role may not do and the real services never need:
+   * reading workspace metadata (the `app-installed` check) and deleting the records the checks create. Defaults
+   * to `client`. The service-account role cannot read metadata or delete people or households, so a run as that
+   * role needs this.
    */
-  cleanupClient?: TwentyClient;
+  adminClient?: TwentyClient;
   baseUrl: string;
   apiKey: string;
   fetch: typeof fetch;
@@ -132,7 +134,19 @@ const CHECKS: { id: string; title: string; run: Check }[] = [
     title:
       'The Fold app is installed: every custom object exists and Person has the extension fields (defineField on a standard object works)',
     run: async (ctx) => {
-      const json = await ctx.client.request('GET', '/rest/metadata/objects');
+      let json: unknown;
+      try {
+        // Metadata is an administrative read: the service-account role is not meant to have it.
+        json = await (ctx.adminClient ?? ctx.client).request('GET', '/rest/metadata/objects');
+      } catch (error) {
+        if (error instanceof TwentyHttpError && (error.status === 401 || error.status === 403))
+          return fail(
+            `this key may not read workspace metadata (HTTP ${error.status}). A least-privilege role such as the ` +
+              'service account is not meant to; set FOLD_M0_ADMIN_API_KEY to an admin key and run again. This is ' +
+              'a limit of the key, not evidence about the install',
+          );
+        throw error;
+      }
       const seen = readMetadata(json);
       const missingObjects = ctx.model.objects.filter((o) => !seen.objects.has(o));
       const missingFields =
@@ -538,11 +552,11 @@ export const MANUAL_CHECKS: Omit<CheckResult, 'status'>[] = [
 ];
 
 export async function runM0(ctx: M0Context): Promise<CheckResult[]> {
-  const cleanupClient = ctx.cleanupClient ?? ctx.client;
+  const adminClient = ctx.adminClient ?? ctx.client;
   const leftBehind: { plural: string; id: string; reason: string }[] = [];
   const remove: RemoveRecord = async (plural, id, priority) => {
     try {
-      await cleanupClient.deleteRecord(plural, id, priority);
+      await adminClient.deleteRecord(plural, id, priority);
     } catch (error) {
       const reason =
         error instanceof TwentyHttpError

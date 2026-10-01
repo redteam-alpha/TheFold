@@ -27,10 +27,10 @@ export interface FakeQuirks {
   /** Reject batches larger than this. */
   maxBatch?: number;
   /**
-   * DELETE on these collections needs the bearer token `adminKey`; any other key gets 403. Models the
-   * service-account role, which cannot delete people or households.
+   * Models the service-account role: DELETE on `deletePlurals`, and the metadata API when `metadata` is true,
+   * need the bearer token `adminKey`; any other key gets 403.
    */
-  adminOnlyDeletes?: { plurals: readonly string[]; adminKey: string };
+  adminOnly?: { adminKey: string; deletePlurals?: readonly string[]; metadata?: boolean };
 }
 
 /** The objects/fields a correct install exposes; the M0 test passes the same lists to the harness. */
@@ -103,6 +103,9 @@ export class FakeTwenty {
   private handle(call: Call): Response {
     if (call.path === '/healthz') return this.json({ status: 'ok' });
     if (call.path === '/rest/metadata/objects' && call.method === 'GET') {
+      const restricted = this.quirks.adminOnly;
+      if (restricted?.metadata && call.authorization !== `Bearer ${restricted.adminKey}`)
+        return this.json({ error: 'authentication failed' }, 403);
       const objects = FAKE_MODEL.objects
         .filter((o) => o !== this.quirks.missingObject)
         .map((nameSingular) => ({ nameSingular, fields: [] as unknown[] }));
@@ -115,9 +118,9 @@ export class FakeTwenty {
     }
     const del = /^\/rest\/([A-Za-z0-9]+)\/([0-9a-f-]{36})$/.exec(call.path);
     if (del && call.method === 'DELETE') {
-      const restricted = this.quirks.adminOnlyDeletes;
+      const restricted = this.quirks.adminOnly;
       if (
-        restricted?.plurals.includes(del[1] as string) &&
+        restricted?.deletePlurals?.includes(del[1] as string) &&
         call.authorization !== `Bearer ${restricted.adminKey}`
       )
         return this.json({ error: 'forbidden' }, 403);

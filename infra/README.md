@@ -45,8 +45,8 @@ path for local source, and `twenty dev` is the same thing in watch mode.
 
 The **"The Fold service account"** role exists only after `apply`. It is not a different kind of key: it is a role that an ordinary API key can be
 given (*Settings → APIs & Webhooks*, pick the role when creating the key; the key is shown once). The real services will use a key with this role,
-so the harness should run as it. Keep your admin key too: the service account cannot delete people or households, which the harness creates and
-removes (step 3).
+so the harness should run as it. Keep an admin key too: the service account deliberately cannot read workspace metadata (the `app-installed` check
+needs that) or delete people and households (the harness creates and removes them). Step 3 uses the admin key for those two jobs only.
 
 ## 3. Run the harness
 
@@ -56,7 +56,7 @@ Run it from the **repository root**: `m0` is a root script, and from inside `app
 cd ~/TheFold                                     # the repository root
 export FOLD_M0_BASE_URL=http://localhost:3000
 export FOLD_M0_API_KEY=...                       # the checks run as THIS key: the service-account key from step 2
-export FOLD_M0_ADMIN_API_KEY=...                 # optional: an admin key, used ONLY to delete the test records
+export FOLD_M0_ADMIN_API_KEY=...                 # an admin key, used ONLY to read workspace metadata and delete test records
 export FOLD_M0_TWENTY_VERSION=v2.43.0            # recorded in the report header (else it says "unknown")
 # Optional, both opt-in:
 export FOLD_M0_RATE_TEST=1                       # sends ~150 GETs to find the rate limit
@@ -77,9 +77,9 @@ the corresponding rows from ❓ to ✅ or ❌, and fix anything that came back F
 | `webhook-signature` | the signed string differs | `defaultSignedPayload` in `webhook.ts` — nothing else |
 
 Run as the **service-account key**, a FAIL that says `403` on a create, read or update means that role is too narrow for what the real services do:
-change `service` in `apps/fold-app/src/model/roles.ts`, `git pull` on the VM and re-run `npx twenty apply --no-delete`. Without
-`FOLD_M0_ADMIN_API_KEY`, records the key may not delete (people, households) are listed in an `INFO` row named `cleanup`; they are test data and
-safe to delete in Twenty.
+change `service` in `apps/fold-app/src/model/roles.ts`, `git pull` on the VM and re-run `npx twenty apply --no-delete`. A `403` on the
+`app-installed` metadata read is **not** that: it is the role working as intended, and it says to set `FOLD_M0_ADMIN_API_KEY`. Without that key,
+records the key may not delete (people, households) are listed in an `INFO` row named `cleanup`; they are test data and safe to delete in Twenty.
 
 ## 4. Do the manual checks
 

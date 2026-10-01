@@ -16,7 +16,7 @@ import { FAKE_MODEL, FakeTwenty, type FakeQuirks } from '../src/testing/fakeTwen
 async function run(
   quirks: FakeQuirks = {},
   env: Record<string, string | undefined> = {},
-  keys: { cleanupKey?: string } = {},
+  keys: { adminKey?: string } = {},
 ) {
   const server = new FakeTwenty(quirks);
   const bucket = new TokenBucket({
@@ -36,7 +36,7 @@ async function run(
   const client = clientFor('k');
   const results = await runM0({
     client,
-    ...(keys.cleanupKey ? { cleanupClient: clientFor(keys.cleanupKey) } : {}),
+    ...(keys.adminKey ? { adminClient: clientFor(keys.adminKey) } : {}),
     baseUrl: 'https://twenty.test',
     apiKey: 'k',
     fetch: server.fetch,
@@ -69,47 +69,67 @@ describe('M0 harness', () => {
       expect(server.rows(plural), `left over in ${plural}`).toEqual([]);
   });
 
-  describe('cleanup when the key may not delete everything (the service-account role)', () => {
-    // The role can soft-delete follow-ups and attendance but not people or households.
+  describe('a least-privilege key (the service-account role): metadata and deletes need an admin key', () => {
+    // The role can create, read and update what the services need, and soft-delete follow-ups and attendance.
+    // It cannot read workspace metadata, and it cannot delete people or households.
     const restricted: FakeQuirks = {
-      adminOnlyDeletes: { plurals: ['people', 'households'], adminKey: 'admin' },
+      adminOnly: { adminKey: 'admin', deletePlurals: ['people', 'households'], metadata: true },
     };
+    const OPERATIONS = [
+      'sourceref-idempotent',
+      'select-defaults',
+      'person-shapes',
+      'batch-limit-and-paging',
+    ];
 
-    it('does not turn passing checks into failures, and lists what it left behind', async () => {
+    it('without an admin key: the operations still pass, and the two limits are reported, not hidden', async () => {
       const { byId, results, server } = await run(restricted);
-      for (const id of [
-        'sourceref-idempotent',
-        'select-defaults',
-        'person-shapes',
-        'batch-limit-and-paging',
-      ])
-        expect(byId[id], id).toMatchObject({ status: 'PASS' });
+      for (const id of OPERATIONS) expect(byId[id], id).toMatchObject({ status: 'PASS' });
+      // The metadata read is refused: say so, and say it is a limit of the key, not of the install.
+      expect(byId['app-installed']?.status).toBe('FAIL');
+      expect(byId['app-installed']?.detail).toContain('HTTP 403');
+      expect(byId['app-installed']?.detail).toContain('FOLD_M0_ADMIN_API_KEY');
+      expect(byId['app-installed']?.detail).toContain('not evidence about the install');
+      // The deletes are refused: the records are left behind and listed.
       expect(server.rows('people').length, 'people really were left behind').toBeGreaterThan(0);
       const cleanup = byId['cleanup'];
       expect(cleanup?.status).toBe('INFO');
       expect(cleanup?.detail).toContain('people/');
       expect(cleanup?.detail).toContain('households/');
       expect(cleanup?.detail).toContain('HTTP 403');
-      expect(cleanup?.detail).toContain('FOLD_M0_ADMIN_API_KEY');
       const ids = results.map((r) => r.id);
       expect(ids.indexOf('cleanup')).toBeLessThan(ids.indexOf('care-permissions'));
     });
 
-    it('leaves nothing behind, and adds no row, when a separate admin key does the cleanup', async () => {
-      const { byId, server } = await run(restricted, {}, { cleanupKey: 'admin' });
+    it('with an admin key: every automated check passes, nothing is left behind, and no cleanup row appears', async () => {
+      const { byId, server } = await run(restricted, {}, { adminKey: 'admin' });
+      for (const id of ['app-installed', ...OPERATIONS])
+        expect(byId[id], id).toMatchObject({ status: 'PASS' });
       expect(byId['cleanup']).toBeUndefined();
       for (const plural of ['followUps', 'people', 'households', 'attendances'])
         expect(server.rows(plural), `left over in ${plural}`).toEqual([]);
     });
 
-    it('uses the admin key for deletes only, never for the checks themselves', async () => {
-      const { server } = await run(restricted, {}, { cleanupKey: 'admin' });
+    it('uses the admin key for the metadata read and for deletes only, never to run the checks', async () => {
+      const { server } = await run(restricted, {}, { adminKey: 'admin' });
       const asAdmin = server.calls.filter((c) => c.authorization === 'Bearer admin');
       expect(asAdmin.length).toBeGreaterThan(0);
-      expect(asAdmin.filter((c) => c.method !== 'DELETE')).toEqual([]);
+      const allowed = (c: (typeof asAdmin)[number]) =>
+        c.method === 'DELETE' || (c.method === 'GET' && c.path === '/rest/metadata/objects');
+      expect(asAdmin.filter((c) => !allowed(c))).toEqual([]);
     });
 
-    it('a normal run, where the key may delete everything, adds no cleanup row', async () => {
+    it('an admin metadata read does not hide a real problem: a missing object still fails and is named', async () => {
+      const { byId } = await run(
+        { ...restricted, missingObject: 'careRequest' },
+        {},
+        { adminKey: 'admin' },
+      );
+      expect(byId['app-installed']?.status).toBe('FAIL');
+      expect(byId['app-installed']?.detail).toContain('careRequest');
+    });
+
+    it('a normal run, where the key may do everything, adds no cleanup row', async () => {
       const { byId } = await run();
       expect(byId['cleanup']).toBeUndefined();
     });
