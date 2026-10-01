@@ -145,6 +145,22 @@ describe('care-permissions-api: can a user without the care role see a care requ
     expect(noTimeline.detail).toContain('NOT tested');
   });
 
+  it('counts a 400 or a GraphQL error as denied only when it says it is a permission refusal', async () => {
+    // v2.43.0 refuses with HTTP 400 + PERMISSION_DENIED, which the default fake reproduces: that is a refusal.
+    const refused = (await run()).care;
+    expect(refused.status).toBe('PASS');
+    expect(refused.detail).toContain('REST by id: denied (HTTP 400, permission refusal)');
+
+    // The same status for a malformed request proves nothing about permissions.
+    const { care } = await run({ rejectsProbesAsMalformed: true });
+    expect(care.status).toBe('INFO');
+    const notTested = care.detail.split('NOT tested')[1] ?? '';
+    for (const surface of ['REST list', 'REST by id', 'REST create', 'GraphQL careRequests'])
+      expect(notTested, surface).toContain(`${surface}:`);
+    expect(notTested).toContain('HTTP 400 that is not a permission refusal');
+    expect(notTested).toContain('a GraphQL error that is not a permission refusal');
+  });
+
   describe('credentials', () => {
     it('fails clearly on a wrong password and never echoes it, even if the server does', async () => {
       const env = { ...ENV, FOLD_M0_STAFF_PASSWORD: 'definitely-wrong-pw' };

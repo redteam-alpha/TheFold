@@ -46,6 +46,11 @@ export interface FakeQuirks {
   noTimeline?: boolean;
   /** A misconfigured care team role that cannot read care requests. */
   careCannotRead?: boolean;
+  /**
+   * The staff user's care-request probes are rejected as malformed (a validation 400 on REST, a validation error
+   * on GraphQL) instead of refused, to prove such answers are never read as "denied".
+   */
+  rejectsProbesAsMalformed?: boolean;
   /** A login error that echoes the password back, to prove the harness scrubs it. */
   echoPasswordInLoginErrors?: boolean;
 }
@@ -214,7 +219,17 @@ export class FakeTwenty {
       return this.json({ data: { search: { edges: nodes.map((node) => ({ node })) } } });
     }
     if (query.includes('careRequests')) {
-      if (!mayReadCare(leaks.graphql)) return denied;
+      if (!mayReadCare(leaks.graphql))
+        return this.quirks.rejectsProbesAsMalformed
+          ? this.json({
+              errors: [
+                {
+                  message: 'Cannot query field "careRequests" on type "Query"',
+                  extensions: { code: 'GRAPHQL_VALIDATION_FAILED' },
+                },
+              ],
+            })
+          : denied;
       const edges = this.rows('careRequests').map((r) => ({
         node: { id: r['id'], name: r['name'] },
       }));
@@ -229,7 +244,10 @@ export class FakeTwenty {
     if (role === 'full') return undefined;
     const care = /^\/rest\/careRequests(\/[0-9a-f-]{36})?$/.exec(call.path);
     if (!care) return undefined;
-    const forbidden = this.json({ error: 'forbidden' }, 403);
+    // A v2.43.0 refusal, as seen on 2026-10-01: HTTP 400 carrying the code PERMISSION_DENIED (not a 403).
+    const forbidden = this.quirks.rejectsProbesAsMalformed
+      ? this.json({ statusCode: 400, messages: ["'filter' parameter invalid"] }, 400)
+      : this.json({ statusCode: 400, code: 'PERMISSION_DENIED' }, 400);
     if (role === 'care') return this.quirks.careCannotRead ? forbidden : undefined;
     const leaks = this.quirks.leaks ?? {};
     if (call.method === 'GET')

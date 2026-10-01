@@ -14,6 +14,12 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env ps      # wait 
 
 Open http://localhost:3000, create the first workspace and an admin user. Mail lands in http://localhost:8025.
 
+Then **deactivate Twenty's two sample workflows**, "Quick Lead" and "Create company when adding a new person": a new workspace ships with
+both active, and the second runs on every new or updated person, which here means every newcomer. Open **Workflows** in the sidebar, open
+each one and deactivate it (menu names can differ by version). Nothing in this repository does it yet: until the provisioner exists, this
+is a manual step for every new workspace. (On 2026-10-01 they were deactivated over the API with `deactivateWorkflowVersion`; see the
+`workflow-bypass` entry in `docs/verification-status.md`.)
+
 ## 2. Install the app (Node 24 required by `twenty-sdk`)
 
 First create an API key in Twenty (*Settings → APIs & Webhooks*). It gets the workspace's default role, which is enough to install. On a
@@ -112,7 +118,7 @@ How to read the `care-permissions-api` row:
 | `FAIL … LEAK … <surface>` | that surface returned the care request or accepted a write | **stop**: do not host a real congregation. Fix the role, re-run |
 | `FAIL … could not sign in` | the login mutations did not work against this server | do the steps in section 5 by hand and write down what the server answered; `login.ts` is then fixed from that |
 | `FAIL … Care team user could not read` | the control failed, so no denial means anything | fix the Care team role or the user's role assignment, re-run |
-| `INFO … NOT tested` | nothing leaked, but some surface could not be exercised (e.g. no search query, no timeline entry within `FOLD_M0_TIMELINE_WAIT_MS`, default 6000) | do **those surfaces** by hand (section 5); it is not a PASS |
+| `INFO … NOT tested` | nothing leaked, but some surface could not be exercised (e.g. no search query, no timeline entry within `FOLD_M0_TIMELINE_WAIT_MS`, default 6000, or an HTTP 400 / GraphQL error that does not say it is a permission refusal: the request itself was probably rejected) | do **those surfaces** by hand (section 5); it is not a PASS |
 | `SKIP` | the four variables are not set | create the users |
 
 ## 4. Do the manual checks

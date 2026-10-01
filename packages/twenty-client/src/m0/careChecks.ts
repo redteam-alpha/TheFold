@@ -35,8 +35,17 @@ export const CARE_SETUP_STEPS =
   'FOLD_M0_CARE_PASSWORD (infra/README.md). The check then asks, as the staff user, for a seeded care request ' +
   'over REST, GraphQL, global search and the timeline, and fails if any of them returns it.';
 
-/** Statuses that mean "you may not": some servers answer 400 or 404 for an object a role cannot see. */
-const DENIED = new Set([400, 401, 403, 404]);
+/** Statuses that always mean "you may not" (some servers answer 404 for an object a role cannot see). */
+const DENIED = new Set([401, 403, 404]);
+
+/**
+ * v2.43.0 refuses with HTTP 400 and `PERMISSION_DENIED` on REST, and `FORBIDDEN` on GraphQL. But 400 and a GraphQL
+ * error are also how a server rejects a malformed request (it rejected `depth=2` that way), and counting that as
+ * "denied" would PASS a surface the probe never reached. So those count only when the answer says it is a refusal.
+ */
+const REFUSAL_TEXT = /permission[_ ]denied|forbidden/i;
+
+const snippet = (text: string) => text.replace(/\s+/g, ' ').trim().slice(0, 120);
 
 interface Seed {
   personId: string;
@@ -56,6 +65,16 @@ type Verdict = { kind: 'ok' | 'leak' | 'untested'; text: string };
 const ok = (text: string): Verdict => ({ kind: 'ok', text });
 const leak = (text: string): Verdict => ({ kind: 'leak', text });
 const untested = (text: string): Verdict => ({ kind: 'untested', text });
+
+/** A failed HTTP answer: a refusal, or proof of nothing. */
+function refusedOr(label: string, p: Probe): Verdict {
+  if (DENIED.has(p.status)) return ok(`${label}: denied (HTTP ${p.status})`);
+  if (p.status === 400)
+    return REFUSAL_TEXT.test(p.text)
+      ? ok(`${label}: denied (HTTP 400, permission refusal)`)
+      : untested(`${label}: HTTP 400 that is not a permission refusal (${snippet(p.text)})`);
+  return untested(`${label}: unexpected HTTP ${p.status}`);
+}
 
 const leaked = (text: string, s: Seed): boolean =>
   text.includes(s.careId) || text.includes(s.marker);
@@ -123,10 +142,7 @@ async function restRead(
 ): Promise<Verdict> {
   const p = await probe(client, 'GET', path, o.query ? { query: o.query } : {});
   if (leaked(p.text, seed)) return leak(`${label}: the care request was returned`);
-  if (!p.ok)
-    return DENIED.has(p.status)
-      ? ok(`${label}: denied (HTTP ${p.status})`)
-      : untested(`${label}: unexpected HTTP ${p.status}`);
+  if (!p.ok) return refusedOr(label, p);
   if (o.noRecords && unwrapRecords(p.json).length > 0)
     return leak(`${label}: care requests were listed`);
   return ok(`${label}: nothing returned`);
@@ -135,13 +151,12 @@ async function restRead(
 function judgeGraphQl(p: Probe, seed: Seed, label: string, listKey?: string): Verdict {
   if (leaked(p.text, seed)) return leak(`${label}: the care request was returned`);
   if (listKey && edgesOf(p, listKey).length > 0) return leak(`${label}: care requests were listed`);
-  if (!p.ok)
-    return DENIED.has(p.status)
-      ? ok(`${label}: denied (HTTP ${p.status})`)
-      : untested(`${label}: unexpected HTTP ${p.status}`);
-  return hasGraphQlErrors(p)
+  if (!p.ok) return refusedOr(label, p);
+  if (!hasGraphQlErrors(p)) return ok(`${label}: nothing returned`);
+  const errors = JSON.stringify(dig(p.json, 'errors'));
+  return REFUSAL_TEXT.test(errors)
     ? ok(`${label}: denied (GraphQL error)`)
-    : ok(`${label}: nothing returned`);
+    : untested(`${label}: a GraphQL error that is not a permission refusal (${snippet(errors)})`);
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -258,9 +273,7 @@ export async function careRequestPermissions(ctx: CheckContext): Promise<CheckOu
     verdicts.push(
       write.ok || written
         ? leak('REST create: staff created a care request')
-        : DENIED.has(write.status)
-          ? ok(`REST create: denied (HTTP ${write.status})`)
-          : untested(`REST create: unexpected HTTP ${write.status}`),
+        : refusedOr('REST create', write),
     );
 
     // ---- staff over GraphQL ------------------------------------------------------------------
@@ -317,7 +330,7 @@ export async function careRequestPermissions(ctx: CheckContext): Promise<CheckOu
     for (let i = 0; i < attempts && !entryExists; i++) {
       const p = await probe(admin, 'GET', '/rest/timelineActivities', { query: byRecord });
       if (!p.ok) {
-        adminDenied = DENIED.has(p.status);
+        adminDenied = refusedOr('timeline', p).kind === 'ok';
         break;
       }
       entryExists = unwrapRecords(p.json).length > 0;

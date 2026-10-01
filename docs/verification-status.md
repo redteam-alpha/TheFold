@@ -129,7 +129,7 @@ Each row names the harness check and the **one place** in our code that changes 
 |---|---|
 | HTTP API, worker processes, member portal UI | ⏳ (`apps/portal-web` and the API/worker entrypoints are not started) |
 | Email delivery, unsubscribe/bounce handling, DSAR export/erase | ⏳ |
-| Provisioner (workspace/cell creation) | ⏳ (blocked on the M0 answers above) |
+| Provisioner (workspace/cell creation) | ⏳ (blocked on the M0 answers above). Must also deactivate Twenty's two sample workflows, which every new workspace ships active (see the `workflow-bypass` entry); until then it is a manual step in `infra/README.md` step 1 |
 | CLA enforcement in CI | ⏳ (`CLA.md` is a draft awaiting counsel) |
 | Weekly canary against the next Twenty tag | ⏳ (needs M0 to be scriptable first) |
 | Legal review: AGPL obligations for hosting, GDPR Art. 9 / COPPA / FCRA, DPA | ⏳ needs counsel |
