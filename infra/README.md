@@ -127,10 +127,11 @@ the search box, the timeline tab on a person, the People CSV export).
 Use this when `care-permissions-api` is `INFO`, `FAIL … could not sign in`, or you want to see the answers yourself. It does exactly what
 the harness does, one surface at a time, so you can read every response.
 
-> **Unverified against a live server.** The login mutations come from the v2.43.0 generated schema, and the `/graphql` shapes for
-> `careRequests` and `search` could not be checked offline (the data schema is generated per workspace). If a command answers
-> differently from what is written here, **the answer is the finding**: note the status and the first lines of the body (never a token or
-> password) in `docs/verification-status.md` and fix the harness from it.
+> **Run against a live v2.43.0 on 2026-10-01**, which corrected three request shapes (the person's relations expand at `depth=1`, not 2;
+> search has to name its objects; a timeline entry points at its record with `targetCareRequestId`, not `linkedRecordId`). The commands
+> below are the corrected ones. On another version, if a command answers differently from what is written here, **the answer is the
+> finding**: note the status and the first lines of the body (never a token or password) in `docs/verification-status.md` and fix the
+> harness from it.
 
 Fake data only. Never paste a token or password anywhere; the shell below holds them in variables and prints neither.
 
@@ -214,19 +215,27 @@ probe "$TOKEN_STAFF" GET "/rest/people?limit=1"              # expect: HTTP 200 
 # REST
 probe "$TOKEN_STAFF" GET "/rest/careRequests"                         # list
 probe "$TOKEN_STAFF" GET "/rest/careRequests/$CARE_ID"                # by id
-probe "$TOKEN_STAFF" GET "/rest/people/$PERSON_ID?depth=2"            # the person, relations expanded
+probe "$TOKEN_CARE"  GET "/rest/people/$PERSON_ID?depth=1"            # control: the care request IS on the person (care id in body: 1)
+probe "$TOKEN_STAFF" GET "/rest/people/$PERSON_ID?depth=1"            # the person, relations expanded (depth=2 is rejected: "Allowed values are 0, 1")
 probe "$TOKEN_STAFF" POST "/rest/careRequests" \
   -d "{\"name\":\"M0 staff should be refused\",\"personId\":\"$PERSON_ID\"}"   # create
 
 # GraphQL
 probe "$TOKEN_STAFF" POST /graphql -d '{"query":"{ careRequests { edges { node { id name } } } }"}'
-# global search (the same box the UI offers)
-probe "$TOKEN_STAFF" POST /graphql -d "$(jq -n --arg q "$MARKER" \
-  '{query:"query($q:String!){search(searchInput:$q,limit:20){edges{node{recordId objectNameSingular label}}}}",variables:{q:$q}}')"
+
+# global search: it has to name the objects it searches (see below)
+search() {  # search TOKEN [json list of object names]; with no list it searches every object
+  probe "$1" POST /graphql -d "$(jq -n --arg q "$MARKER" --argjson o "${2:-null}" \
+    '{query:"query($q:String!,$o:[String!]){search(searchInput:$q,limit:20,includedObjectNameSingulars:$o){edges{node{recordId objectNameSingular label}}}}",variables:{q:$q,o:$o}}')"
+}
+search "$TOKEN_CARE"  '["careRequest"]'       # control: the Care team finds it (care id in body: 1)
+search "$TOKEN_STAFF" '["careRequest"]'       # care requests only
+search "$TOKEN_STAFF" '["person"]'            # people only
+search "$TOKEN_STAFF"                         # every object
 
 # timeline: first prove an entry exists (admin key), then ask as staff
-probe "$FOLD_M0_ADMIN_API_KEY" GET /rest/timelineActivities -G --data-urlencode "filter=linkedRecordId[eq]:\"$CARE_ID\""
-probe "$TOKEN_STAFF"           GET /rest/timelineActivities -G --data-urlencode "filter=linkedRecordId[eq]:\"$CARE_ID\""
+probe "$FOLD_M0_ADMIN_API_KEY" GET /rest/timelineActivities -G --data-urlencode "filter=targetCareRequestId[eq]:\"$CARE_ID\""
+probe "$TOKEN_STAFF"           GET /rest/timelineActivities -G --data-urlencode "filter=targetCareRequestId[eq]:\"$CARE_ID\""
 probe "$TOKEN_STAFF"           GET /rest/timelineActivities -G --data-urlencode "filter=targetPersonId[eq]:\"$PERSON_ID\"" --data-urlencode limit=60
 ```
 
@@ -234,14 +243,20 @@ How to read each line:
 
 | Surface | PASS looks like | FAIL (leak) looks like |
 |---|---|---|
-| REST list | `HTTP 403` (or 404), or `200` with an empty list / `totalCount: 0` | any care request listed |
-| REST by id | `HTTP 403` or `404` | `200` with `care id in body: 1` |
-| person, `depth=2` | `200` for the person **without** a `careRequests` list | the care request inside the person |
-| REST create | `HTTP 403` | `2xx` (a care request was created: delete it with the admin key) |
-| GraphQL `careRequests` | `errors` (forbidden) or `"edges":[]` | an edge with the id or the marker |
-| global search | no edge for the care request (nothing, or only the person) | an edge whose `label` is the marker |
+| REST list | a refusal (v2.43.0 answers `HTTP 400` with `"code":"PERMISSION_DENIED"`; 403 or 404 on other versions), or `200` with an empty list / `totalCount: 0` | any care request listed |
+| REST by id | the same refusal | `200` with `care id in body: 1` |
+| person, `depth=1` | `200` for the person **without** a `careRequests` list, while the Care team line above it shows `care id in body: 1` | the care request inside the person |
+| REST create | the same refusal | `2xx` (a care request was created: delete it with the admin key) |
+| GraphQL `careRequests` | `errors` (`FORBIDDEN`) or `"edges":[]` | an edge with the id or the marker |
+| global search, care requests only | `errors` (`FORBIDDEN`) or no edge, while the Care team line above it shows `care id in body: 1` | an edge whose `label` is the marker |
+| global search, people only / every object | no edge for the care request (nothing, only the person, or `FORBIDDEN`) | an edge whose `label` is the marker |
 | timeline, 1st line (admin) | an entry **is** returned (`care id in body: 1`); if not, wait a few seconds and repeat: there is nothing to test yet | — |
-| timeline, 2nd and 3rd lines (staff) | `403`, or `200` with no entry for the care request | the entry (it names the record and may reveal that the person is receiving care) |
+| timeline, 2nd and 3rd lines (staff) | a refusal, or `200` with no entry for the care request | the entry (it names the record and may reveal that the person is receiving care) |
+
+Why search names its objects: on v2.43.0 a search with no `includedObjectNameSingulars` answers `FORBIDDEN` for **both** test roles, the
+Care team included (an admin key gets results), so it cannot tell the two roles apart. Scoped to `careRequest` it can: the Care team finds
+the marker and Church staff is refused. Whether the search box in the browser copes with this for these roles is part of the `MANUAL`
+`care-permissions` check.
 
 If `search` answers `Cannot query field "search"`, copy the query the UI's search box sends (browser developer tools → Network → the
 `graphql` request) and use it instead; run the same query as the **Care team** user first, to check it can find the marker at all. Do not

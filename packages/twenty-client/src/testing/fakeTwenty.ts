@@ -169,7 +169,7 @@ export class FakeTwenty {
     const role = this.roleOf(call);
     const { query = '', variables = {} } = (call.body ?? {}) as {
       query?: string;
-      variables?: Record<string, string>;
+      variables?: Record<string, unknown>;
     };
     const leaks = this.quirks.leaks ?? {};
     const denied = this.json({
@@ -183,13 +183,25 @@ export class FakeTwenty {
     if (query.includes('search(')) {
       if (this.quirks.noSearch)
         return this.json({ errors: [{ message: 'Cannot query field "search" on type "Query"' }] });
-      const q = String(variables['q'] ?? '').toLowerCase();
+      // As seen on v2.43.0 (2026-10-01): a search is refused outright when it reaches an object the role may
+      // not read. With no `includedObjectNameSingulars` that is every object, so both test roles are refused
+      // and only a key with full access gets an answer; scoped to care requests, only the care team is served.
+      const scope = Array.isArray(variables['objects'])
+        ? (variables['objects'] as unknown[])
+        : null;
+      const searchesCare = scope === null || scope.includes('careRequest');
+      const searchesPeople = scope === null || scope.includes('person');
+      if (searchesCare && !mayReadCare(leaks.search)) return denied;
+      if (scope === null && role === 'care') return denied;
+      const q = (typeof variables['q'] === 'string' ? variables['q'] : '').toLowerCase();
       const hit = (name: unknown) => typeof name === 'string' && name.toLowerCase().includes(q);
       const nodes = [
-        ...this.rows('people')
-          .filter((r) => hit(r['name']))
-          .map((r) => ({ recordId: r['id'], objectNameSingular: 'person', label: 'person' })),
-        ...(mayReadCare(leaks.search)
+        ...(searchesPeople
+          ? this.rows('people')
+              .filter((r) => hit(r['name']))
+              .map((r) => ({ recordId: r['id'], objectNameSingular: 'person', label: 'person' }))
+          : []),
+        ...(searchesCare
           ? this.rows('careRequests')
               .filter((r) => hit(r['name']))
               .map((r) => ({
@@ -275,7 +287,18 @@ export class FakeTwenty {
       const row = this.rows(one[1] as string).find((r) => r['id'] === one[2]);
       if (!row) return this.json({ error: 'not found' }, 404);
       const record: Record<string, unknown> = { ...row };
-      if (one[1] === 'people' && Number(call.query['depth'] ?? 0) >= 1) {
+      const depth = call.query['depth'] ?? '0';
+      // v2.43.0 expands relations one level and rejects anything deeper (seen 2026-10-01).
+      if (depth !== '0' && depth !== '1')
+        return this.json(
+          {
+            statusCode: 400,
+            error: 'BadRequestException',
+            messages: [`'depth=${depth}' parameter invalid. Allowed values are 0, 1`],
+          },
+          400,
+        );
+      if (one[1] === 'people' && depth === '1') {
         const role = this.roleOf(call);
         const mayReadCare =
           role === 'full' ||
@@ -316,7 +339,7 @@ export class FakeTwenty {
         this.roleOf(call) === 'staff' &&
         !this.quirks.leaks?.timeline
       )
-        rows = rows.filter((r) => !String(r['name']).startsWith('careRequest'));
+        rows = rows.filter((r) => r['targetCareRequestId'] == null);
       const since = /^updatedAt\[gt\]:"(.*)"$/.exec(filter);
       if (since) rows = rows.filter((r) => String(r['updatedAt']) > String(since[1]));
       rows.sort((a, b) => String(a['updatedAt']).localeCompare(String(b['updatedAt'])));
@@ -349,13 +372,16 @@ export class FakeTwenty {
       updatedAt: this.now(),
     };
     this.rows(plural).push(row);
+    // The shape v2.43.0 writes for "record created" (seen 2026-10-01): the record is the `target<Object>Id`;
+    // `linkedRecordId` stays null, and the entry is not attached to the person the care request is about.
     if (plural === 'careRequests' && !this.quirks.noTimeline)
       this.rows('timelineActivities').push({
         id: randomUUID(),
-        name: 'careRequest.created',
-        linkedRecordId: row.id,
-        linkedRecordCachedName: row['name'],
-        targetPersonId: row['personId'] ?? null,
+        name: null,
+        linkedRecordId: null,
+        linkedRecordCachedName: '',
+        targetCareRequestId: row.id,
+        targetPersonId: null,
         createdAt: this.now(),
         updatedAt: this.now(),
       });

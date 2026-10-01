@@ -108,15 +108,18 @@ Each row names the harness check and the **one place** in our code that changes 
 | The server enforces a 60-record batch limit | ✅ (it does **not**, on `v2.43.0`) | `batch-61` INFO: a batch of **61 was accepted in one request** (2026-10-01). Twenty documents 60, so the client keeps chunking at 60 | `MAX_BATCH` stays 60 on purpose |
 | Cloud API limit ≈ 100 requests/minute; **self-host limit unknown** | ❓ | `rate-limit` (opt-in) | `DEFAULT_BUCKET` in `bucket.ts` |
 | Webhook headers `X-Twenty-Webhook-Signature` / `-Timestamp`; HMAC-SHA256 over `"<timestamp>.<body>"`; timestamp unit | ❓ | `webhook-signature` (opt-in) | `defaultSignedPayload` in `webhook.ts` — nothing else |
-| Invitation email reaches Mailpit once the **worker** has the `EMAIL_*` settings (it sends queued email; the server alone is not enough) | ❓ | invite a test member, look in http://localhost:8025 | `infra/docker-compose.yml` (worker environment). Observed 2026-10-01: with the settings on the server only, **no invitation reached Mailpit**. Twenty's own compose file lists `EMAIL_*` on the worker too; the fix is unconfirmed until a mail arrives |
+| Invitation email reaches Mailpit once the **worker** has the `EMAIL_*` settings (it sends queued email; the server alone is not enough) | ✅ | invite a test member, look in http://localhost:8025 | `infra/docker-compose.yml` (worker environment). Observed 2026-10-01: with the settings on the server only, **no invitation reached Mailpit** (the email queue showed 5 completed jobs and the inbox was empty). After `39bcdd8` and the step-1 `up -d`, which recreated only `twenty-worker`, the resent invitations were logged by the worker as `[SmtpDriver] Email to '…' successfully sent` and 4 messages were in Mailpit. Invitations sent before the fix are not retried: resend them |
 | Webhook payload shape and what a Person merge does to ids/events | ❓ | manual `person-merge` | webhook adapter; `person_alias` handling |
 | Workspace creation and app install can be scripted | ❓ | manual `multi-workspace` | provisioner (ADR 0002) |
 | `IS_MULTIWORKSPACE_ENABLED` is licensed/allowed for self-hosters | ❓ | manual `multi-workspace` | ADR 0002 (cells vs shared workspaces) |
 | Everything works with **no** enterprise key | ❓ | manual `no-enterprise-key` | `docs/enterprise-avoid.md` |
 | The app works with logic functions and the code interpreter disabled (their production default) | ❓ | manual `logic-functions-off` | none expected: The Fold uses none |
-| A user can sign in with email and password through `getLoginTokenFromCredentials` then `getAuthTokensFromLoginToken` (both on `POST /metadata`) and use the access token as a Bearer token on `/rest` and `/graphql` | ❓ | `care-permissions-api` (needs two test users) | the shapes come from the v2.43.0 generated schema (`twenty-client-sdk`), **not yet seen working live**; `login.ts` is fixed from the real answer |
-| A user without the care role cannot see a `careRequest` over **REST** (list, by id, person with relations, create), **GraphQL**, **global search** or the **timeline** | ❓ | automated `care-permissions-api` (as a Church staff user, with a Care team user as the positive control; nothing is PASS unless every surface was tested) | roles in `model/roles.ts`; if any surface leaks, **do not host a real congregation**. The GraphQL `careRequests` and `search` shapes, and that a timeline entry is created for a care request, are unverified until a run |
-| Same, in the **browser**: sidebar, direct URL `/objects/careRequests`, the search box, the person page's timeline tab, People CSV export | ❓ | manual `care-permissions` (UI only) | roles in `model/roles.ts` |
+| A user can sign in with email and password through `getLoginTokenFromCredentials` then `getAuthTokensFromLoginToken` (both on `POST /metadata`) and use the access token as a Bearer token on `/rest` and `/graphql` | ✅ | `care-permissions-api` signed in as both test users (fourth and fifth runs, 2026-10-01), and so did `infra/README.md` 5.2 by hand with `curl` | `login.ts`; the shapes from the v2.43.0 generated schema (`twenty-client-sdk`) were right as written |
+| A user without the care role cannot see a `careRequest` over **REST** (list, by id, person with relations, create), **GraphQL**, **global search** or the **timeline** | ✅ | automated `care-permissions-api` **PASS** (fifth run, 2026-10-01), as a Church staff user with a Care team user as the positive control. The fourth run was INFO: three request shapes were wrong for this server, so those surfaces were checked by hand first (run log), with no leak, and the harness was then fixed | roles in `model/roles.ts`; if any surface leaks, **do not host a real congregation**. Church staff is refused with HTTP 400 `PERMISSION_DENIED` on REST (list, by id, create) and `FORBIDDEN` on GraphQL. The three rows below are the shapes this needed |
+| `GET /rest/people/<id>` expands relations at `depth=1`; anything deeper is rejected | ✅ | by hand, 2026-10-01: `depth=2` → 400 `'depth=2' parameter invalid. Allowed values are 0, 1`. At `depth=1` the Care team user gets `careRequests` on the person; the Church staff user gets the person with no `careRequests` or `careRequestsOwned` field at all | `RELATION_DEPTH` in `twenty-client/src/m0/careChecks.ts` |
+| GraphQL `search` (on `/graphql`, not `/metadata`) only tells the roles apart when it names its objects (`includedObjectNameSingulars`) | ✅ over the API; ❓ what the browser's search box does | by hand, 2026-10-01: with **no** object list it is `FORBIDDEN` for the Church staff **and** the Care team user (an admin key gets results). Scoped to `careRequest`: Care team finds the record, Church staff `FORBIDDEN`. Scoped to `person`: both get the person only | `SEARCH_SCOPES` in `careChecks.ts`. If the search box (Ctrl/Cmd+K) does not work for these roles in the browser, that is a usability finding for manual `care-permissions`, not a leak |
+| A "record created" timeline entry points at its record through `target<Object>Id` (`targetCareRequestId`); `linkedRecordId` is null, and the entry is not attached to the person | ✅ | by hand, 2026-10-01: the admin key and the Care team user get the entry with `filter=targetCareRequestId[eq]:"<id>"`; the Church staff user gets `200` with no entry, sees only the person's own "created" entry on the person's timeline, and no care-request entry in an unfiltered listing | `timelineOfCareRequest` in `careChecks.ts` |
+| Same, in the **browser**: sidebar, direct URL `/objects/careRequests`, the search box, the person page's timeline tab, People CSV export | ❓ | manual `care-permissions` (UI only). Also check that the search box **works at all** as each role (see the `search` row above) | roles in `model/roles.ts` |
 | Workflows cannot be used to read objects a role cannot read | ❓ | manual `workflow-bypass` | restrict workflow editing to admins (ADR 0004) |
 
 ## 5. Not built yet
@@ -133,6 +136,55 @@ Each row names the harness check and the **one place** in our code that changes 
 ## 6. M0 run log
 
 Paste each `pnpm m0` table here (newest first) with the date and the Twenty version, and update the ❓ rows above.
+
+### M0 run — 2026-10-01 (fifth) — Twenty v2.43.0 — service account, with the two test users — **8 PASS · 0 FAIL · 1 INFO · 2 SKIP · 8 MANUAL**
+
+The first run with `care-permissions-api` at PASS, after the three request shapes below were fixed. Same keys as the third run; the test users are
+`staff@fold-test.example` (Church staff) and `care@fold-test.example` (Care team), both fake. No `cleanup` row, so nothing was left behind.
+
+| Status | Check | Observed |
+|---|---|---|
+| PASS | `health`, `auth-and-rest`, `app-installed`, `sourceref-idempotent`, `select-defaults`, `person-shapes`, `batch-limit-and-paging` | as in the third run |
+| **PASS** | `care-permissions-api` | as the Church staff user every surface denied or hid the care request: REST list, by id and create denied (HTTP 400); REST person with relations: nothing returned; GraphQL `careRequests`: denied (GraphQL error); global search: care requests only denied, people only nothing returned, every object denied; timeline of the care request and of the person: nothing returned. The Care team user could read it (control) |
+| INFO | `batch-61` | accepted 61 records in one request |
+| SKIP | `rate-limit`, `webhook-signature` | opt-in checks not enabled |
+| MANUAL | 8 checks | not done |
+
+This covers the **API** half of care permissions only. The browser half (`care-permissions`) and `workflow-bypass` are still not done, so the rule stands:
+do not put a real congregation on this instance until both pass.
+
+### Care permissions by hand — 2026-10-01 — `infra/README.md` section 5, for the three surfaces the fourth run could not test
+
+A fake person and care request were seeded with the service-account key and deleted afterwards with the admin key (both `HTTP 200`; nothing left behind).
+Controls: the Care team user read the care request by id (`200`), and the Church staff user could list people (`200`).
+
+| Surface | Care team (control) | Church staff | Result |
+|---|---|---|---|
+| Person with relations, `depth=1` | care request listed on the person | person returned with no `careRequests` or `careRequestsOwned` field | no leak |
+| Global search scoped to `careRequest` | finds it | `FORBIDDEN` | no leak |
+| Global search scoped to `person` | the person only | the person only | no leak |
+| Global search, no object list | `FORBIDDEN` | `FORBIDDEN` | no leak (and no use as a control) |
+| Timeline, `targetCareRequestId[eq]` | 1 entry (`recordCreated`) | `200`, 0 entries | no leak |
+| Timeline of the person, `targetPersonId[eq]` | not run | only the person's own "created" entry | no leak |
+| Timeline, newest 60, no filter | not run | 8 entries, none with a care-request target | no leak |
+
+What the fourth run got wrong, each fixed in `careChecks.ts`, the fake server and README section 5: `depth=2` is rejected by this server (`Allowed values
+are 0, 1`); `search` with no object list is refused for both roles; and the timeline entry carries the record in `targetCareRequestId`, with
+`linkedRecordId` null. The REST refusals the fourth run reported as "denied (HTTP 400)" were read here too: all three say `PERMISSION_DENIED`, and
+GraphQL `careRequests` says `FORBIDDEN`, so they are permission refusals and not rejected payloads.
+
+### M0 run — 2026-10-01 (fourth) — Twenty v2.43.0 — service account, with the two test users — **7 PASS · 0 FAIL · 2 INFO · 2 SKIP · 8 MANUAL**
+
+The first run of `care-permissions-api` against a real server. Sign-in worked for both users. No leak was found, but three surfaces were not tested, so the
+row was INFO and not a PASS.
+
+| Status | Check | Observed |
+|---|---|---|
+| PASS | the same seven checks as the third run | unchanged |
+| INFO | `batch-61` | accepted 61 records in one request |
+| **INFO** | `care-permissions-api` | no leak found on 4 surfaces: REST list, by id and create denied (HTTP 400); GraphQL `careRequests` denied (GraphQL error). **NOT tested:** REST person with relations (the care request did not appear on the person even for the Care team); global search (the Care team could not find it either); timeline (no entry found within the wait). The Care team user could read the record (control) |
+| SKIP | `rate-limit`, `webhook-signature` | opt-in checks not enabled |
+| MANUAL | 8 checks | not done |
 
 ### M0 run — 2026-10-01 (third) — Twenty v2.43.0 — as the **service account**; admin key only for the metadata read and cleanup — **7 PASS · 0 FAIL · 1 INFO · 2 SKIP · 8 MANUAL**
 

@@ -86,6 +86,30 @@ describe('care-permissions-api: can a user without the care role see a care requ
     expect(server.rows('people')).toEqual([]);
   });
 
+  it('asks in the shapes a live v2.43.0 answers: depth 1, a scoped search, the timeline by its target', async () => {
+    const { server, care } = await run();
+    const asUser = server.calls.filter((c) => c.authorization?.startsWith('Bearer user:'));
+
+    const personReads = asUser.filter((c) => /^\/rest\/people\/[0-9a-f-]{36}$/.test(c.path));
+    expect(personReads.map((c) => c.query['depth'])).toEqual(['1', '1']);
+
+    // The Care team's scoped search is the control; staff then asks in every scope, the unscoped one last.
+    const searches = asUser
+      .filter((c) => c.path === '/graphql')
+      .map((c) => c.body as { query: string; variables?: { objects?: string[] | null } })
+      .filter((b) => b.query.includes('search('))
+      .map((b) => b.variables?.objects);
+    expect(searches).toEqual([['careRequest'], ['careRequest'], ['person'], null]);
+    for (const scope of ['care requests only', 'people only', 'every object'])
+      expect(care.detail, scope).toContain(scope);
+
+    const timelineFilters = server.calls
+      .filter((c) => c.path === '/rest/timelineActivities')
+      .map((c) => c.query['filter'] ?? '');
+    expect(timelineFilters[0]).toMatch(/^targetCareRequestId\[eq\]:"[0-9a-f-]{36}"$/);
+    expect(timelineFilters.join(' ')).not.toContain('linkedRecordId');
+  });
+
   describe('every surface can fail, and a leak names only its own surface', () => {
     for (const [leakKey, label] of Object.entries(SURFACES)) {
       it(`${label}`, async () => {

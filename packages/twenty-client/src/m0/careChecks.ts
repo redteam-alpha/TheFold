@@ -76,12 +76,33 @@ async function probe(
   }
 }
 
-const gql = (client: TwentyClient, query: string, variables?: Record<string, string>) =>
+const gql = (client: TwentyClient, query: string, variables?: Record<string, unknown>) =>
   probe(client, 'POST', '/graphql', { body: { query, ...(variables ? { variables } : {}) } });
 
 const CARE_LIST = '{ careRequests { edges { node { id name } } } }';
 const SEARCH =
-  'query ($q: String!) { search(searchInput: $q, limit: 20) { edges { node { recordId objectNameSingular label } } } }';
+  'query ($q: String!, $objects: [String!]) { search(searchInput: $q, limit: 20, includedObjectNameSingulars: $objects) ' +
+  '{ edges { node { recordId objectNameSingular label } } } }';
+
+/**
+ * Global search is asked three ways as the staff user. Seen on v2.43.0 (2026-10-01): a search that names no
+ * objects is FORBIDDEN for both test roles, Care team included, so it cannot be the control; the Care team finds
+ * the care request only when the search is scoped to care requests. "People only" is the search staff may run.
+ */
+const SEARCH_SCOPES: readonly (readonly [string, readonly string[] | null])[] = [
+  ['care requests only', ['careRequest']],
+  ['people only', ['person']],
+  ['every object', null],
+];
+
+/** `/rest/people/<id>` expands relations at depth 1; v2.43.0 rejects anything deeper ("Allowed values are 0, 1"). */
+const RELATION_DEPTH = 1;
+
+/**
+ * A timeline entry points at its record through `target<Object>Id`. `linkedRecordId` is for a linked note or
+ * task and is null on a "record created" entry, so filtering on it finds nothing (seen on v2.43.0, 2026-10-01).
+ */
+const timelineOfCareRequest = (careId: string) => `targetCareRequestId[eq]:"${careId}"`;
 
 const edgesOf = (p: Probe, key: string): unknown[] => {
   const edges = dig(p.json, 'data', key, 'edges');
@@ -214,13 +235,13 @@ export async function careRequestPermissions(ctx: CheckContext): Promise<CheckOu
     verdicts.push(await restRead(staff, seed, 'REST by id', `/rest/careRequests/${seed.careId}`));
     verdicts.push(
       await restRead(staff, seed, 'REST person with relations', `/rest/people/${seed.personId}`, {
-        query: { depth: 2 },
+        query: { depth: RELATION_DEPTH },
       }),
     );
 
     // The person page is only a meaningful test if the relation really shows for someone allowed to see it.
     const careViewOfPerson = await probe(care, 'GET', `/rest/people/${seed.personId}`, {
-      query: { depth: 2 },
+      query: { depth: RELATION_DEPTH },
     });
     if (!careViewOfPerson.ok || !careViewOfPerson.text.includes(seed.careId))
       verdicts[verdicts.length - 1] = untested(
@@ -257,16 +278,30 @@ export async function careRequestPermissions(ctx: CheckContext): Promise<CheckOu
     }
 
     // ---- global search -----------------------------------------------------------------------
-    const careSearch = await gql(care, SEARCH, { q: seed.marker });
-    if (careSearch.text.includes(seed.careId) || careSearch.text.includes(seed.marker)) {
+    // Control: scoped to care requests, the Care team must find it. Then staff asks in every scope.
+    const careSearch = await gql(care, SEARCH, { q: seed.marker, objects: ['careRequest'] });
+    if (leaked(careSearch.text, seed)) {
+      const scoped: [string, Verdict][] = [];
+      for (const [scope, objects] of SEARCH_SCOPES)
+        scoped.push([
+          scope,
+          judgeGraphQl(await gql(staff, SEARCH, { q: seed.marker, objects }), seed, scope),
+        ]);
+      const found = scoped.filter(([, v]) => v.kind === 'leak').map(([scope]) => scope);
+      const unclear = scoped.filter(([, v]) => v.kind === 'untested').map(([, v]) => v.text);
       verdicts.push(
-        judgeGraphQl(await gql(staff, SEARCH, { q: seed.marker }), seed, 'global search'),
+        found.length > 0
+          ? leak(`global search: the care request was returned (${found.join(', ')})`)
+          : unclear.length > 0
+            ? untested(`global search: ${unclear.join(', ')}`)
+            : ok(`global search: ${scoped.map(([, v]) => v.text).join(', ')}`),
       );
     } else {
       verdicts.push(
         untested(
-          'global search: the Care team could not find the care request either (no such query, not indexed ' +
-            'yet, or a different shape); check it by hand in the UI and with the curl steps in infra/README.md',
+          'global search: the Care team could not find the care request either, even scoped to care requests ' +
+            '(no such query, not indexed yet, or a different shape); check it by hand in the UI and with the ' +
+            'curl steps in infra/README.md',
         ),
       );
     }
@@ -276,7 +311,7 @@ export async function careRequestPermissions(ctx: CheckContext): Promise<CheckOu
     // ask for it as staff, and ask for the person's timeline, where it would also show.
     const waitMs = Number(ctx.env['FOLD_M0_TIMELINE_WAIT_MS'] ?? 6000);
     const attempts = Math.max(1, Math.ceil(waitMs / 750));
-    const byRecord = { filter: `linkedRecordId[eq]:"${seed.careId}"`, limit: 20 };
+    const byRecord = { filter: timelineOfCareRequest(seed.careId), limit: 20 };
     let entryExists = false;
     let adminDenied = false;
     for (let i = 0; i < attempts && !entryExists; i++) {
