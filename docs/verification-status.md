@@ -115,7 +115,7 @@ Each row names the harness check and the **one place** in our code that changes 
 | Everything works with **no** enterprise key | ❓ | manual `no-enterprise-key` | `docs/enterprise-avoid.md` |
 | The app works with logic functions and the code interpreter disabled (their production default) | ❓ | manual `logic-functions-off` | none expected: The Fold uses none |
 | A user can sign in with email and password through `getLoginTokenFromCredentials` then `getAuthTokensFromLoginToken` (both on `POST /metadata`) and use the access token as a Bearer token on `/rest` and `/graphql` | ✅ | `care-permissions-api` signed in as both test users (fourth and fifth runs, 2026-10-01), and so did `infra/README.md` 5.2 by hand with `curl` | `login.ts`; the shapes from the v2.43.0 generated schema (`twenty-client-sdk`) were right as written |
-| A user without the care role cannot see a `careRequest` over **REST** (list, by id, person with relations, create), **GraphQL**, **global search** or the **timeline** | ✅ | automated `care-permissions-api` **PASS** (fifth run, 2026-10-01), as a Church staff user with a Care team user as the positive control. The fourth run was INFO: three request shapes were wrong for this server, so those surfaces were checked by hand first (run log), with no leak, and the harness was then fixed | roles in `model/roles.ts`; if any surface leaks, **do not host a real congregation**. Church staff is refused with HTTP 400 `PERMISSION_DENIED` on REST (list, by id, create) and `FORBIDDEN` on GraphQL. The three rows below are the shapes this needed |
+| A user without the care role cannot see a `careRequest` over **REST** (list, by id, person with relations, create), **GraphQL**, **global search** or the **timeline** | ✅ | automated `care-permissions-api` **PASS** (fifth run, 2026-10-01, and again on the sixth, 2026-10-02, under the stricter rule that a 400 counts as a refusal only when it says so), as a Church staff user with a Care team user as the positive control. The fourth run was INFO: three request shapes were wrong for this server, so those surfaces were checked by hand first (run log), with no leak, and the harness was then fixed | roles in `model/roles.ts`; if any surface leaks, **do not host a real congregation**. Church staff is refused with HTTP 400 `PERMISSION_DENIED` on REST (list, by id, create) and `FORBIDDEN` on GraphQL. The three rows below are the shapes this needed |
 | `GET /rest/people/<id>` expands relations at `depth=1`; anything deeper is rejected | ✅ | by hand, 2026-10-01: `depth=2` → 400 `'depth=2' parameter invalid. Allowed values are 0, 1`. At `depth=1` the Care team user gets `careRequests` on the person; the Church staff user gets the person with no `careRequests` or `careRequestsOwned` field at all | `RELATION_DEPTH` in `twenty-client/src/m0/careChecks.ts` |
 | GraphQL `search` (on `/graphql`, not `/metadata`) only tells the roles apart when it names its objects (`includedObjectNameSingulars`) | ✅ over the API; ❓ what the browser's search box does | by hand, 2026-10-01: with **no** object list it is `FORBIDDEN` for the Church staff **and** the Care team user (an admin key gets results). Scoped to `careRequest`: Care team finds the record, Church staff `FORBIDDEN`. Scoped to `person`: both get the person only | `SEARCH_SCOPES` in `careChecks.ts`. If the search box (Ctrl/Cmd+K) does not work for these roles in the browser, that is a usability finding for manual `care-permissions`, not a leak |
 | A "record created" timeline entry points at its record through `target<Object>Id` (`targetCareRequestId`); `linkedRecordId` is null, and the entry is not attached to the person | ✅ | by hand, 2026-10-01: the admin key and the Care team user get the entry with `filter=targetCareRequestId[eq]:"<id>"`; the Church staff user gets `200` with no entry, sees only the person's own "created" entry on the person's timeline, and no care-request entry in an unfiltered listing | `timelineOfCareRequest` in `careChecks.ts` |
@@ -137,6 +137,23 @@ Each row names the harness check and the **one place** in our code that changes 
 ## 6. M0 run log
 
 Paste each `pnpm m0` table here (newest first) with the date and the Twenty version, and update the ❓ rows above.
+
+### M0 run — 2026-10-02 (sixth) — Twenty v2.43.0 — service account, with the two test users — **8 PASS · 0 FAIL · 1 INFO · 2 SKIP · 8 MANUAL**
+
+The first run after `980b4f1`, which counts a 400 or a GraphQL error as a refusal only when its text says `PERMISSION_DENIED` or `FORBIDDEN`. Against
+the live server the stricter rule changes nothing but the wording: the three REST denials now read "permission refusal". Same keys and test users as
+the fifth run; no `cleanup` row. The two sample workflows were already deactivated when this ran.
+
+| Status | Check | Observed |
+|---|---|---|
+| PASS | `health`, `auth-and-rest`, `app-installed`, `sourceref-idempotent`, `select-defaults`, `person-shapes`, `batch-limit-and-paging` | as in the fifth run |
+| **PASS** | `care-permissions-api` | as the Church staff user every surface denied or hid the care request: REST list, by id and create denied (HTTP 400, permission refusal); REST person with relations: nothing returned; GraphQL `careRequests`: denied (GraphQL error); global search: care requests only denied, people only nothing returned, every object denied; timeline of the care request and of the person: nothing returned. The Care team user could read it (control) |
+| INFO | `batch-61` | accepted 61 records in one request |
+| SKIP | `rate-limit`, `webhook-signature` | opt-in checks not enabled |
+| MANUAL | 8 checks | `workflow-bypass` was done by hand over the API (entry below); the rest not done |
+
+Still open before a real congregation goes on this instance: the browser half of `care-permissions`, and whether a workflow acts with more rights than
+the user who set it off (the unanswered half of `workflow-bypass`).
 
 ### `workflow-bypass` by hand — 2026-10-01 — Twenty v2.43.0 — over the API, as the two test users — **passes as written; the elevated-rights question is open**
 
