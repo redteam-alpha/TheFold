@@ -75,9 +75,19 @@ export class FakeTwenty {
     return this;
   }
 
+  /** Soft-deleted records, by plural. Kept apart so `rows()` stays "what Twenty still lists". */
+  readonly trash = new Map<string, Record<string, unknown>[]>();
+
+  /** The live records: what Twenty's lists and GET-by-id return. */
   rows(plural: string): Record<string, unknown>[] {
     let t = this.tables.get(plural);
     if (!t) this.tables.set(plural, (t = []));
+    return t;
+  }
+
+  deleted(plural: string): Record<string, unknown>[] {
+    let t = this.trash.get(plural);
+    if (!t) this.trash.set(plural, (t = []));
     return t;
   }
 
@@ -287,7 +297,11 @@ export class FakeTwenty {
       const rows = this.rows(del[1] as string);
       const i = rows.findIndex((r) => r['id'] === del[2]);
       if (i === -1) return this.json({ error: 'not found' }, 404);
-      rows.splice(i, 1);
+      // A soft delete, like v2.43.0's REST DELETE: the record leaves lists and GET-by-id (404) and comes back
+      // only when a filter names `deletedAt`. Whether Twenty also bumps `updatedAt` is unverified, so this
+      // leaves it alone: the reconcile must not depend on it.
+      const [gone] = rows.splice(i, 1);
+      if (gone) this.deleted(del[1] as string).push({ ...gone, deletedAt: this.now() });
       return this.json({ data: { deleteOne: { id: del[2] } } });
     }
     const batch = /^\/rest\/batch\/([A-Za-z0-9]+)$/.exec(call.path);
@@ -344,8 +358,11 @@ export class FakeTwenty {
       );
     }
     if (many && call.method === 'GET') {
-      let rows = [...this.rows(many[1] as string)];
       const filter = this.quirks.ignoreFilters ? '' : (call.query['filter'] ?? '');
+      // Soft-deleted records are listed only when the filter names `deletedAt` (seen on v2.43.0).
+      let rows = /\bdeletedAt\[/.test(filter)
+        ? [...this.rows(many[1] as string), ...this.deleted(many[1] as string)]
+        : [...this.rows(many[1] as string)];
       const ref = /^sourceRef\[eq\]:"(.*)"$/.exec(filter);
       if (ref) rows = rows.filter((r) => r['sourceRef'] === ref[1]);
       const eq = /^([A-Za-z]+)\[eq\]:"(.*)"$/.exec(filter);
@@ -358,9 +375,12 @@ export class FakeTwenty {
         !this.quirks.leaks?.timeline
       )
         rows = rows.filter((r) => r['targetCareRequestId'] == null);
-      const since = /^updatedAt\[gt\]:"(.*)"$/.exec(filter);
-      if (since) rows = rows.filter((r) => String(r['updatedAt']) > String(since[1]));
-      rows.sort((a, b) => String(a['updatedAt']).localeCompare(String(b['updatedAt'])));
+      const since = /^(updatedAt|deletedAt)\[gt\]:"(.*)"$/.exec(filter);
+      const by = since?.[1] ?? 'updatedAt';
+      // Timestamps are ISO strings here; anything else sorts first, like a null.
+      const at = (r: Record<string, unknown>) => (typeof r[by] === 'string' ? r[by] : '');
+      if (since) rows = rows.filter((r) => at(r) > (since[2] ?? ''));
+      rows.sort((a, b) => at(a).localeCompare(at(b)));
       const limit = Number(call.query['limit'] ?? 60);
       const start = call.query['starting_after']
         ? rows.findIndex((r) => r['id'] === call.query['starting_after']) + 1

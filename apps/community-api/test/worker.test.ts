@@ -182,6 +182,61 @@ describe.skipIf(!dbAvailable)('worker', () => {
     expect((await people()).map((p) => p.first_name)).toEqual(['A1', 'A2', 'A3', 'A4', 'A5']);
   });
 
+  it('marks a person deleted in Twenty at the next reconcile, without any webhook', async () => {
+    // Twenty's lists leave soft-deleted records out, so the changes pass alone never sees a delete (VM run,
+    // 2026-10-02): this person would stay visible in the portal for good.
+    await twentyPerson('Ana');
+    const ben = await twentyPerson('Ben');
+    const first = await worker().tickTenant(t.id);
+    expect(first.reconciled).toMatchObject({ person: 2, 'person:deleted': 0 });
+
+    await fastClient(server).deleteRecord('people', ben.id);
+    await inT((c) => c.query(`UPDATE sync_cursor SET last_run_at = now() - interval '2 hours'`));
+    const second = await worker().tickTenant(t.id);
+    expect(second.reconciled).toMatchObject({ person: 0, 'person:deleted': 1 });
+    const after = await people();
+    expect(after.find((p) => p.first_name === 'Ben')?.deleted_at).toBeInstanceOf(Date);
+    expect(after.find((p) => p.first_name === 'Ana')?.deleted_at).toBeNull();
+
+    // The next run re-reads from just before its cursor: the same delete is not counted again.
+    await inT((c) => c.query(`UPDATE sync_cursor SET last_run_at = now() - interval '2 hours'`));
+    const third = await worker().tickTenant(t.id);
+    expect(third.reconciled['person:deleted']).toBe(0);
+
+    const cursors = await inT((c) =>
+      c.query<{ object_type: string }>(`SELECT object_type FROM sync_cursor ORDER BY object_type`),
+    );
+    expect(cursors.rows.map((r) => r.object_type)).toEqual([
+      'groupMembership',
+      'groupMembership:deleted',
+      'person',
+      'person:deleted',
+    ]);
+  });
+
+  it('reads many deletions in capped slices, like changes', async () => {
+    const client = fastClient(server);
+    const made = [];
+    for (const name of ['D1', 'D2', 'D3']) made.push(await twentyPerson(name));
+    await reconcileObject(db.appPool, t.id, client, 'person', {
+      everyMs: 3_600_000,
+      log: silentLogger,
+    });
+    for (const p of made) await client.deleteRecord('people', p.id);
+    const slice = (maxPages: number) =>
+      reconcileObject(db.appPool, t.id, client, 'person', {
+        everyMs: 3_600_000,
+        maxPages,
+        pageSize: 2,
+        pass: 'deletes',
+        log: silentLogger,
+      });
+    expect(await slice(1)).toMatchObject({ ran: true, more: true, applied: 2 });
+    expect(await slice(5)).toMatchObject({ ran: true, more: false, applied: 1 });
+    expect(await slice(5)).toMatchObject({ ran: false });
+    expect((await people()).every((p) => p.deleted_at instanceof Date)).toBe(true);
+  });
+
   it('keeps a church’s jobs waiting, not failed, until its Twenty key is set; housekeeping still runs', async () => {
     await inT((c) =>
       submitConnectionCard(

@@ -3,17 +3,19 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 
 /**
  * Twenty signs webhook deliveries with HMAC-SHA256 and sends `X-Twenty-Webhook-Signature` and
- * `X-Twenty-Webhook-Timestamp` (docs research, 2026-09-30).
+ * `X-Twenty-Webhook-Timestamp`.
  *
- * UNVERIFIED: the exact string that is signed and the signature's encoding. The default below is the
- * common `HMAC(secret, "<timestamp>.<rawBody>")` as lowercase hex. The M0 harness (scripts/m0) checks
- * this against a real Twenty webhook; if it differs, change `signedPayload` and nothing else.
+ * Read from the v2.43.0 build (`call-webhook.job.js`, 2026-10-02), not yet seen in a delivery: the signed
+ * string is `"<timestamp>:<JSON body>"` (a colon; the docs we first worked from implied a dot), the
+ * signature is lowercase hex, the timestamp is `Date.now()` in milliseconds, and a third header,
+ * `X-Twenty-Webhook-Nonce`, is sent but not signed. With no secret on the webhook Twenty sends none of them.
+ * If a real delivery disagrees, change `defaultSignedPayload` and nothing else (docs/verification-status.md).
  */
 export const SIGNATURE_HEADER = 'x-twenty-webhook-signature';
 export const TIMESTAMP_HEADER = 'x-twenty-webhook-timestamp';
 
 export const defaultSignedPayload = (timestamp: string, rawBody: string): string =>
-  `${timestamp}.${rawBody}`;
+  `${timestamp}:${rawBody}`;
 
 export type WebhookVerdict =
   { ok: true } | { ok: false; reason: 'MALFORMED' | 'STALE' | 'BAD_SIGNATURE' };
@@ -44,7 +46,7 @@ export function verifyWebhook(input: {
   if (!timestamp || !signature || !/^\d+$/.test(timestamp) || !/^[0-9a-f]+$/i.test(signature)) {
     return { ok: false, reason: 'MALFORMED' };
   }
-  // Twenty's timestamp unit is UNVERIFIED; accept seconds or milliseconds.
+  // v2.43.0 sends milliseconds (read from the build); seconds are accepted too, in case that ever changes.
   const tsMs = timestamp.length > 11 ? Number(timestamp) : Number(timestamp) * 1000;
   const tolerance = (input.toleranceSeconds ?? 300) * 1000;
   if (Math.abs(input.now - tsMs) > tolerance) return { ok: false, reason: 'STALE' };

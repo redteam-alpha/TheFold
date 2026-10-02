@@ -124,13 +124,17 @@ export class Worker {
         r.refetched = f.applied + f.stale + f.gone;
       });
       for (const objectType of Object.keys(SYNCED_OBJECTS))
-        await step(`reconcile:${objectType}`, async () => {
-          const rec = await reconcileObject(this.o.pool, tenantId, client, objectType, {
-            everyMs: this.o.reconcileEveryMs,
-            log: this.o.log,
+        for (const pass of ['changes', 'deletes'] as const) {
+          const key = pass === 'deletes' ? `${objectType}:deleted` : objectType;
+          await step(`reconcile:${key}`, async () => {
+            const rec = await reconcileObject(this.o.pool, tenantId, client, objectType, {
+              everyMs: this.o.reconcileEveryMs,
+              pass,
+              log: this.o.log,
+            });
+            if (rec.ran) r.reconciled[key] = rec.applied;
           });
-          if (rec.ran) r.reconciled[objectType] = rec.applied;
-        });
+        }
     }
 
     const every = this.o.housekeepingEveryMs ?? 24 * 3_600_000;
@@ -158,6 +162,8 @@ export class Worker {
         refetched: r.refetched,
         reconciledPeople: r.reconciled['person'],
         reconciledMemberships: r.reconciled['groupMembership'],
+        reconciledPeopleDeleted: r.reconciled['person:deleted'],
+        reconciledMembershipsDeleted: r.reconciled['groupMembership:deleted'],
         errors: r.errors,
       });
     return r;

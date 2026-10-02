@@ -29,6 +29,14 @@ export interface RequestOptions {
   retry?: boolean;
 }
 
+/** Position and size of one page of a "since" listing (`listUpdatedSincePage`, `listDeletedSincePage`). */
+export interface PageOptions {
+  /** Twenty's `endCursor` of the previous page of the SAME query. */
+  after?: string | null;
+  priority?: Priority;
+  pageSize?: number;
+}
+
 /** Source references are ours (`welcome:<id>`, `drift:<unit>:<week>`); keep them boring so they can never break out of a filter. */
 const SOURCE_REF = /^[A-Za-z0-9:_.-]{1,200}$/;
 const OBJECT_PLURAL = /^[a-z][A-Za-z0-9]{1,63}$/;
@@ -272,7 +280,30 @@ export class TwentyClient {
   async listUpdatedSincePage(
     plural: string,
     sinceIso: string,
-    o: { after?: string | null; priority?: Priority; pageSize?: number } = {},
+    o: PageOptions = {},
+  ): Promise<Page<TwentyRecord>> {
+    return this.listSincePage(plural, 'updatedAt', sinceIso, o);
+  }
+
+  /**
+   * One page of records soft-deleted after `sinceIso`, oldest deletion first. Twenty's lists leave
+   * soft-deleted records out (observed on v2.43.0), so the reconcile could otherwise never learn that a person
+   * was deleted, and someone removed from the church's records would stay visible in the portal.
+   * UNVERIFIED: that `deletedAt[gt]` brings deleted records back the way `deletedAt[is]:NOT_NULL` does.
+   */
+  async listDeletedSincePage(
+    plural: string,
+    sinceIso: string,
+    o: PageOptions = {},
+  ): Promise<Page<TwentyRecord>> {
+    return this.listSincePage(plural, 'deletedAt', sinceIso, o);
+  }
+
+  private async listSincePage(
+    plural: string,
+    field: 'updatedAt' | 'deletedAt',
+    sinceIso: string,
+    o: PageOptions,
   ): Promise<Page<TwentyRecord>> {
     assertPlural(plural);
     if (Number.isNaN(Date.parse(sinceIso)))
@@ -280,8 +311,8 @@ export class TwentyClient {
     const since = new Date(sinceIso).toISOString();
     const json = await this.request('GET', `/rest/${plural}`, {
       query: {
-        filter: `updatedAt[gt]:"${since}"`,
-        order_by: 'updatedAt[AscNullsFirst]',
+        filter: `${field}[gt]:"${since}"`,
+        order_by: `${field}[AscNullsFirst]`,
         limit: o.pageSize ?? 60,
         starting_after: o.after ?? undefined,
       },

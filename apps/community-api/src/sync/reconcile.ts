@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { TwentyClient, TwentyRecord } from '@thefold/twenty-client';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { withTenant } from '../db/tenant.js';
 import type { Logger } from '../log.js';
-import { SYNCED_OBJECTS } from './apply.js';
+import { SYNCED_OBJECTS, type ApplyOutcome } from './apply.js';
 
 export interface ReconcileReport {
   ran: boolean;
@@ -16,8 +16,16 @@ export interface ReconcileReport {
 }
 
 /**
- * Re-reads one object's changes since the last run: the safety net under the webhooks (lost deliveries, a
- * worker that was down, a fetch that failed).
+ * Which records a reconcile run reads. `changes`: records updated since the cursor, applied to the read model.
+ * `deletes`: records soft-deleted since the cursor, marked deleted. Twenty's lists leave soft-deleted records
+ * out (seen on v2.43.0), so without this pass a person deleted in Twenty while no webhook arrived would stay
+ * visible in the portal for good. Each pass keeps its own cursor row (`person`, `person:deleted`).
+ */
+export type ReconcilePass = 'changes' | 'deletes';
+
+/**
+ * Re-reads one object's changes (or deletions) since the last run: the safety net under the webhooks (lost
+ * deliveries, a worker that was down, a fetch that failed).
  *
  *  - Claim-then-run: `last_run_at` is stamped when a run starts, so two workers never reconcile the same object
  *    at once, and a run that dies simply waits for the next interval.
@@ -32,10 +40,22 @@ export async function reconcileObject(
   tenantId: string,
   twenty: TwentyClient,
   objectType: string,
-  opts: { everyMs: number; maxPages?: number; pageSize?: number; log: Logger },
+  opts: {
+    everyMs: number;
+    maxPages?: number;
+    pageSize?: number;
+    pass?: ReconcilePass;
+    log: Logger;
+  },
 ): Promise<ReconcileReport> {
   const object = SYNCED_OBJECTS[objectType];
   if (!object) throw new Error(`Not a synced object: ${objectType}`);
+  const deletes = opts.pass === 'deletes';
+  const cursorKey = deletes ? `${objectType}:deleted` : objectType;
+  const field = deletes ? 'deletedAt' : 'updatedAt';
+  // A deletion we already hold (re-read one second before the cursor) counts as STALE, like a change.
+  const markGone = async (c: PoolClient, record: TwentyRecord): Promise<ApplyOutcome> =>
+    record.id === '' ? 'SKIPPED' : (await object.markGone(c, record.id)) ? 'APPLIED' : 'STALE';
   const report: ReconcileReport = {
     ran: false,
     more: false,
@@ -48,7 +68,7 @@ export async function reconcileObject(
   const claimed = await withTenant(pool, tenantId, async (c) => {
     await c.query(
       `INSERT INTO sync_cursor (tenant_id, object_type) VALUES (fold_current_tenant(), $1) ON CONFLICT DO NOTHING`,
-      [objectType],
+      [cursorKey],
     );
     const { rows } = await c.query<{
       cursor_updated_at: Date;
@@ -58,7 +78,7 @@ export async function reconcileObject(
       `UPDATE sync_cursor SET last_run_at = now()
         WHERE object_type = $1 AND (last_run_at IS NULL OR last_run_at < now() - make_interval(secs => $2::float8))
         RETURNING cursor_updated_at, resume_since, resume_after`,
-      [objectType, opts.everyMs / 1000],
+      [cursorKey, opts.everyMs / 1000],
     );
     return rows[0] ?? null;
   });
@@ -72,21 +92,22 @@ export async function reconcileObject(
   const seen = new Set<string>();
 
   for (;;) {
-    const page = await twenty.listUpdatedSincePage(object.plural, since, {
-      after,
-      pageSize: opts.pageSize ?? 60,
-    });
+    const pageOpts = { after, pageSize: opts.pageSize ?? 60 };
+    const page = deletes
+      ? await twenty.listDeletedSincePage(object.plural, since, pageOpts)
+      : await twenty.listUpdatedSincePage(object.plural, since, pageOpts);
     const next = page.nextCursor ?? null;
     if (next !== null && seen.has(next)) throw new Error(`Pagination cursor repeated: ${next}`);
     if (next !== null) seen.add(next);
 
     const newest = page.items.reduce<number>((max, r: TwentyRecord) => {
-      const t = typeof r['updatedAt'] === 'string' ? Date.parse(r['updatedAt']) : NaN;
+      const value = r[field];
+      const t = typeof value === 'string' ? Date.parse(value) : NaN;
       return Number.isNaN(t) ? max : Math.max(max, t);
     }, claimed.cursor_updated_at.getTime());
     await withTenant(pool, tenantId, async (c) => {
       for (const record of page.items) {
-        const outcome = await object.apply(c, record);
+        const outcome = deletes ? await markGone(c, record) : await object.apply(c, record);
         if (outcome === 'APPLIED') report.applied++;
         else if (outcome === 'STALE') report.stale++;
         else report.skipped++;
@@ -97,7 +118,7 @@ export async function reconcileObject(
                 resume_since = CASE WHEN $3::text IS NULL THEN NULL ELSE $4::timestamptz END,
                 resume_after = $3::text
           WHERE object_type = $1`,
-        [objectType, new Date(newest), next, since],
+        [cursorKey, new Date(newest), next, since],
       );
     });
     report.pages++;
@@ -111,9 +132,14 @@ export async function reconcileObject(
 
   if (report.more)
     await withTenant(pool, tenantId, (c) =>
-      c.query(`UPDATE sync_cursor SET last_run_at = NULL WHERE object_type = $1`, [objectType]),
+      c.query(`UPDATE sync_cursor SET last_run_at = NULL WHERE object_type = $1`, [cursorKey]),
     );
   if (report.skipped > 0)
-    opts.log.warn('reconcile.unmappable', { tenantId, objectType, skipped: report.skipped });
+    opts.log.warn('reconcile.unmappable', {
+      tenantId,
+      objectType,
+      pass: opts.pass ?? 'changes',
+      skipped: report.skipped,
+    });
   return report;
 }

@@ -13,8 +13,11 @@ export type ApplyOutcome = 'APPLIED' | 'STALE' | 'SKIPPED';
 export interface SyncedObject {
   plural: string;
   apply(client: PoolClient, record: TwentyRecord): Promise<ApplyOutcome>;
-  /** The record no longer exists in Twenty: hide our copy (kept, marked deleted, for links and audit). */
-  markGone(client: PoolClient, id: string): Promise<void>;
+  /**
+   * The record no longer exists in Twenty: hide our copy (kept, marked deleted, for links and audit).
+   * Resolves true if this call marked it, false if it was already marked or never copied.
+   */
+  markGone(client: PoolClient, id: string): Promise<boolean>;
 }
 
 export const SYNCED_OBJECTS: Readonly<Record<string, SyncedObject>> = {
@@ -25,10 +28,11 @@ export const SYNCED_OBJECTS: Readonly<Record<string, SyncedObject>> = {
       return row ? upsertPersonRead(client, row) : 'SKIPPED';
     },
     async markGone(client, id) {
-      await client.query(
+      const { rowCount } = await client.query(
         `UPDATE person_read SET deleted_at = now(), synced_at = now() WHERE twenty_person_id = $1 AND deleted_at IS NULL`,
         [id],
       );
+      return (rowCount ?? 0) > 0;
     },
   },
   groupMembership: {
@@ -38,10 +42,11 @@ export const SYNCED_OBJECTS: Readonly<Record<string, SyncedObject>> = {
       return row ? upsertMembershipRead(client, row) : 'SKIPPED';
     },
     async markGone(client, id) {
-      await client.query(
+      const { rowCount } = await client.query(
         `UPDATE membership_read SET deleted_at = now(), synced_at = now() WHERE twenty_membership_id = $1 AND deleted_at IS NULL`,
         [id],
       );
+      return (rowCount ?? 0) > 0;
     },
   },
 };

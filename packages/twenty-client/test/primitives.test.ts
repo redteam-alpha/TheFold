@@ -267,8 +267,16 @@ describe('webhook signatures', () => {
     ).toEqual({ ok: true });
   });
 
-  it('matches an independent HMAC-SHA256 computation over "<timestamp>.<body>"', () => {
-    expect(good).toBe(createHmac('sha256', secret).update(`${ts}.${body}`).digest('hex'));
+  it('matches an independent HMAC-SHA256 computation over "<timestamp>:<body>" (Twenty v2.43.0)', () => {
+    expect(good).toBe(createHmac('sha256', secret).update(`${ts}:${body}`).digest('hex'));
+  });
+
+  it('rejects a delivery signed over "<timestamp>.<body>", the form the docs implied', () => {
+    const tsMs = String(now);
+    const dotted = createHmac('sha256', secret).update(`${tsMs}.${body}`).digest('hex');
+    expect(
+      verifyWebhook({ secret, timestamp: tsMs, signature: dotted, rawBody: body, now }),
+    ).toEqual({ ok: false, reason: 'BAD_SIGNATURE' });
   });
 
   it('rejects a wrong secret, a tampered body and a tampered timestamp', () => {

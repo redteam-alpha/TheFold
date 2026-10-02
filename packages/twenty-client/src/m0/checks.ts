@@ -453,7 +453,7 @@ const CHECKS: { id: string; title: string; run: Check }[] = [
         const delivery = received[0];
         if (!delivery)
           return fail(
-            'no delivery received within 30s (can Twenty reach that host and port? is the workspace allowed to call private addresses?)',
+            'no delivery received within 30s. Twenty refuses private addresses silently unless the host is in OUTBOUND_HTTP_ALLOWED_INTERNAL_HOSTS on twenty-worker; and can its containers reach that host and port?',
           );
 
         const secret =
@@ -468,7 +468,8 @@ const CHECKS: { id: string; title: string; run: Check }[] = [
         }; timestamp="${ts ?? '?'}"`;
         if (!secret) return info(`${seen}. Set FOLD_M0_WEBHOOK_SECRET to also test the signature`);
         const candidates: Record<string, (t: string, b: string) => string> = {
-          '<timestamp>.<body>': defaultSignedPayload,
+          '<timestamp>:<body>': defaultSignedPayload,
+          '<timestamp>.<body>': (t, b) => `${t}.${b}`,
           '<body>': (_t, b) => b,
           '<timestamp><body>': (t, b) => `${t}${b}`,
           'v0:<timestamp>:<body>': (t, b) => `v0:${t}:${b}`,

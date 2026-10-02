@@ -5,7 +5,7 @@
 #   cp infra/.env.example infra/.env   # then fill in the two secrets
 #   docker compose -f infra/docker-compose.yml --env-file infra/.env up -d
 #
-# The community API and member portal have no runtime entrypoint yet; they join this file when they do.
+# The member portal has no runtime entrypoint yet; it joins this file when it does.
 name: thefold
 
 services:
@@ -60,6 +60,12 @@ services:
       EMAIL_DRIVER: smtp
       EMAIL_SMTP_HOST: mailpit
       EMAIL_SMTP_PORT: 1025
+      # The worker also sends webhooks, and Twenty refuses every private address unless its host is listed here
+      # (silently: the job is logged as processed and nothing is sent). Exactly one host, the community API's,
+      # by the alias below. Never `*`, and never OUTBOUND_HTTP_SAFE_MODE_ENABLED=false: either would let anyone
+      # who can create a webhook or a workflow point Twenty at every service on this network.
+      # Production does not need this: webhooks go to the community API's public HTTPS address.
+      OUTBOUND_HTTP_ALLOWED_INTERNAL_HOSTS: community-api.thefold.internal
     depends_on:
       twenty-server:
         condition: service_healthy
@@ -143,6 +149,11 @@ services:
     command: ['api']
     ports:
       - '${COMMUNITY_API_PORT:-4000}:4000'
+    networks:
+      default:
+        # The name Twenty's webhooks use. Twenty's webhook form refuses a host name without a dot, so the
+        # service name `community-api` cannot be entered there; `.internal` is reserved for private networks.
+        aliases: ['community-api.thefold.internal']
     environment: &community-runtime
       FOLD_DB_HOST: community-db
       FOLD_DB_NAME: community

@@ -343,18 +343,33 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env exec community-
 The answer is `{"received":true}` whether the person was new, already known, or sent the same card twice: a stranger cannot use the
 form to check who belongs to a church.
 
-### 6.3 Twenty webhooks (optional, UNVERIFIED payload)
+### 6.3 Twenty webhooks (optional; the signature and payload are not yet seen in a delivery)
 
-Without webhooks the worker still picks up changes made in Twenty, at the hourly reconcile. With them, within seconds:
+Without webhooks the worker still picks up changes **and deletions** made in Twenty, at the hourly reconcile. With them, within seconds:
 
-1. Pick a secret (`openssl rand -hex 24`), put it in `FOLD_TWENTY_WEBHOOK_SECRET`, and run `up -d` again.
-2. In Twenty, **Settings → APIs & Webhooks → Webhooks**: create one with the URL `http://community-api:4000/v1/webhooks/twenty/<slug>`
-   (Twenty reaches the service inside the compose network) and the same secret. Menu names can differ by version; if Twenty generates
-   its own secret instead, put that one in `.env`. If Twenty refuses a plain-`http` or internal URL, note the exact message in the
-   ledger: that decides whether webhooks need a TLS endpoint in front of the service.
-3. Change a test person in Twenty and look for `webhook.hint` (at `FOLD_LOG_LEVEL=debug`) or `webhook.rejected` in the API log.
+1. Pick a secret (`openssl rand -hex 24`), put it in `FOLD_TWENTY_WEBHOOK_SECRET`, and run `up -d` again. `community-setup` should log
+   `webhookSecretVersion: 1` (a higher number after you change the secret).
+2. In Twenty, **Settings → APIs & Webhooks → Webhooks**, create one for all objects and all events, with the same secret and the URL
 
-The signature check (`X-Twenty-Webhook-Signature` over `"<timestamp>.<body>"`) and the payload shape (`eventName: "person.updated"`,
-`record.id`) come from documentation, not from a live Twenty. A `webhook.rejected ... BAD_SIGNATURE` for real deliveries means the signed
-string differs (fix `defaultSignedPayload` in `packages/twenty-client/src/webhook.ts`); `IGNORED` answers mean the payload differs
-(fix `src/http/webhookPayload.ts`). Record what you see in `docs/verification-status.md`.
+   ```
+   http://community-api.thefold.internal:4000/v1/webhooks/twenty/<slug>
+   ```
+
+   Not `http://community-api:4000/…`, and not the machine's LAN address:
+   - Twenty's webhook form will not save a host name without a dot. `community-api.thefold.internal` is a second name for the same
+     container (a network alias in `docker-compose.yml`; `.internal` is reserved for private networks).
+   - Twenty refuses to send to any private address unless its host is listed in `OUTBOUND_HTTP_ALLOWED_INTERNAL_HOSTS` on
+     `twenty-worker`. The compose file lists this one name and nothing else. The refusal is silent: the worker logs
+     `CallWebhookJob processed` and no request goes out.
+   - On the VM the LAN address is not reachable from inside the containers, so even when allowed it times out.
+3. Change a test person in Twenty and look for `webhook.hint` (at `FOLD_LOG_LEVEL=debug`) or `webhook.rejected` in the API log; delete
+   one and check that its `person_read` row gets a `deleted_at`.
+
+In production Twenty calls the community API at its public HTTPS address instead; that is not a private address, so nothing needs to
+be allowed, and the allow-list line can go.
+
+What Twenty sends was read from the `v2.43.0` build, not yet seen in a delivery: `X-Twenty-Webhook-Signature` is HMAC-SHA256 over
+`"<timestamp>:<body>"` (a colon) with the timestamp in milliseconds, plus an unsigned `X-Twenty-Webhook-Nonce`; the body has
+`eventName: "person.updated"`, `objectMetadata.nameSingular` and `record`. A `webhook.rejected ... BAD_SIGNATURE` for real deliveries
+means the signed string differs (fix `defaultSignedPayload` in `packages/twenty-client/src/webhook.ts`); `IGNORED` answers mean the
+payload differs (fix `src/http/webhookPayload.ts`). Record what you see in `docs/verification-status.md`.

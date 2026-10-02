@@ -315,6 +315,23 @@ describe('batching and reconcile paging', () => {
     expect(last.items.map((r) => r['name'])).toEqual(['p4']);
     expect(last.nextCursor).toBeNull();
   });
+
+  it('lists soft-deleted records by deletedAt, which the updatedAt listing leaves out', async () => {
+    const { client, server } = setup();
+    const made = await client.batchCreate('people', [{ name: 'kept' }, { name: 'gone' }]);
+    await client.deleteRecord('people', made[1]?.id ?? '');
+    const since = '2020-01-01T00:00:00Z';
+
+    const live = await client.listUpdatedSincePage('people', since);
+    expect(live.items.map((r) => r['name'])).toEqual(['kept']);
+
+    const deleted = await client.listDeletedSincePage('people', since);
+    expect(deleted.items.map((r) => r['name'])).toEqual(['gone']);
+    const query = server.calls.at(-1)?.query;
+    expect(query?.['filter']).toBe(`deletedAt[gt]:"${new Date(since).toISOString()}"`);
+    expect(query?.['order_by']).toBe('deletedAt[AscNullsFirst]');
+    await expect(client.listDeletedSincePage('people', 'yesterday')).rejects.toThrow(TypeError);
+  });
 });
 
 describe('unwrapRecords', () => {
