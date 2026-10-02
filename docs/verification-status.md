@@ -110,6 +110,10 @@ Each row names the harness check and the **one place** in our code that changes 
 | Webhook headers `X-Twenty-Webhook-Signature` / `-Timestamp`; HMAC-SHA256 over `"<timestamp>.<body>"`; timestamp unit | ❓ | `webhook-signature` (opt-in) | `defaultSignedPayload` in `webhook.ts` — nothing else |
 | Invitation email reaches Mailpit once the **worker** has the `EMAIL_*` settings (it sends queued email; the server alone is not enough) | ✅ | invite a test member, look in http://localhost:8025 | `infra/docker-compose.yml` (worker environment). Observed 2026-10-01: with the settings on the server only, **no invitation reached Mailpit** (the email queue showed 5 completed jobs and the inbox was empty). After `39bcdd8` and the step-1 `up -d`, which recreated only `twenty-worker`, the resent invitations were logged by the worker as `[SmtpDriver] Email to '…' successfully sent` and 4 messages were in Mailpit. Invitations sent before the fix are not retried: resend them |
 | Webhook payload shape and what a Person merge does to ids/events | ❓ | manual `person-merge` | webhook adapter; `person_alias` handling |
+| Twenty's webhook body names the event as `eventName: "<object>.<action>"` with the record under `record` (the community API's receiver reads this, and tolerates `event`/`type`, `objectMetadata.nameSingular`, `data`) | ❓ | manual: `infra/README.md` 6.3; an `IGNORED` answer for a real delivery means the shape differs | `apps/community-api/src/http/webhookPayload.ts` |
+| `GET /rest/<plural>/<id>` returns the record (unwrapped like a list) and 404 once it is deleted | ❓ (the fake server answers `{data: {record}}`) | the worker's refetch on the VM: a person changed in Twenty appears in `person_read`; a deleted one is marked deleted | `TwentyClient.getRecord` |
+| The worker reaches Twenty at `http://twenty-server:3000` inside the compose network with the service-account key (no host-based workspace lookup) | ❓ | `infra/README.md` 6.2: the card's people and follow-ups appear in Twenty | `FOLD_TWENTY_BASE_URL` |
+| The community service's own flow (setup → API → worker → Twenty) works against a real Twenty | ❓ | `infra/README.md` 6.2. Seen in the sandbox (2026-10-02) against the fake Twenty over HTTP: setup on a fresh database, a card → 2 people, 1 attendance, 3 follow-ups, all outbox jobs `DONE`; a signed webhook queued, a forged one 401; SIGTERM stops both cleanly | `apps/community-api` |
 | Workspace creation and app install can be scripted | ❓ | manual `multi-workspace` | provisioner (ADR 0002) |
 | `IS_MULTIWORKSPACE_ENABLED` is licensed/allowed for self-hosters | ❓ | manual `multi-workspace` | ADR 0002 (cells vs shared workspaces) |
 | Everything works with **no** enterprise key | ❓ | manual `no-enterprise-key` | `docs/enterprise-avoid.md` |
@@ -127,7 +131,8 @@ Each row names the harness check and the **one place** in our code that changes 
 
 | Item | Status |
 |---|---|
-| HTTP API, worker processes, member portal UI | ⏳ (`apps/portal-web` and the API/worker entrypoints are not started) |
+| Community API and worker | ✅ built (2026-10-02, ADR 0006): connection-card intake, Twenty webhook receiver, outbox/refetch/reconcile/housekeeping worker, setup and provisioning, Docker image and compose services. Not built: portal sign-in, portal read APIs, escalation sweeps for overdue follow-ups, metrics. Against a real Twenty: ❓ (section 4) |
+| Member portal UI | ⏳ (`apps/portal-web` is not started) |
 | Email delivery, unsubscribe/bounce handling, DSAR export/erase | ⏳ |
 | Provisioner (workspace/cell creation) | ⏳ (blocked on the M0 answers above). Must also deactivate Twenty's two sample workflows, which every new workspace ships active (see the `workflow-bypass` entry); until then it is a manual step in `infra/README.md` step 1 |
 | CLA enforcement in CI | ⏳ (`CLA.md` is a draft awaiting counsel) |

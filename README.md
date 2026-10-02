@@ -20,7 +20,8 @@ The platform won't create belonging by itself. It gives a church the tools to pr
 
 ## Status
 
-Early build (milestones M0–M1 of the plan). **Nothing here has run against a live Twenty yet** — see
+Early build (milestones M0–M1 of the plan). The Twenty app installs on a live Twenty v2.43.0 and the M0 harness passes there with
+fake data, including the automated care-permission check; the community service has **not** yet run against a live Twenty. See
 [`docs/verification-status.md`](docs/verification-status.md) for exactly what is verified, what is only tested against a
 stand-in, and what is still an assumption.
 
@@ -28,12 +29,12 @@ stand-in, and what is still an assumption.
 |---|---|
 | `packages/core` | The rules that decide how people are treated, dependency-free and heavily tested: baseline-relative drift detection (no scores, nothing sent to the person), welcomer assignment, follow-up escalation, identity matching, prayer-request visibility, notification digests |
 | `packages/shared` | Stable Twenty identifiers (valid UUID v4, pinned by test) and validated contracts that encode the safety rules |
-| `apps/community-api` | PostgreSQL with tenant row-level security, the Twenty sync pipeline (outbox, webhook inbox, read models), envelope-encrypted care storage, and the first working flow end to end: **connection card → guest created in Twenty → fair welcomer pick → follow-ups due in 48 hours / 7 days / 21 days**. Tested on a real PostgreSQL 16, including retries and lost responses |
+| `apps/community-api` | PostgreSQL with tenant row-level security, the Twenty sync pipeline (outbox, webhook inbox, read models), envelope-encrypted care storage, and the first working flow end to end: **connection card → guest created in Twenty → fair welcomer pick → follow-ups due in 48 hours / 7 days / 21 days**. Runs as an HTTP API, a background worker and a one-shot `setup` (ADR 0006; `infra/README.md` section 6). Tested on a real PostgreSQL 16, including retries and lost responses |
 | `packages/twenty-client` | Rate-limited, retry-safe, idempotent access to Twenty, and the **M0 harness** that checks our assumptions against a real instance |
 | `apps/fold-app` | The Twenty app: 10 objects, 37 Person fields, roles (care metadata visible only to the care team, pastors and admins), views and navigation, validated by the SDK's own validators |
 | `infra/` | Pinned, unmodified Twenty + the community database; refuses to start without its secrets |
 
-Not built yet: the HTTP server and worker entrypoints, the member portal UI, email delivery, the escalation sweep, and the provisioner.
+Not built yet: portal sign-in and the portal's own API, the member portal UI, email delivery, the escalation sweep, and the provisioner.
 
 ## Architecture in one picture
 

@@ -148,6 +148,22 @@ export class TwentyClient {
     return unwrapRecords(json)[0] ?? null;
   }
 
+  /**
+   * `GET /rest/<plural>/<id>`. Null when the record does not exist (404), including after it was deleted, so a
+   * webhook refetch can tell "gone" from "failed".
+   */
+  async getRecord(plural: string, id: string, priority?: Priority): Promise<TwentyRecord | null> {
+    assertPlural(plural);
+    if (!RECORD_ID.test(id)) throw new TypeError('invalid record id');
+    try {
+      const json = await this.request('GET', `/rest/${plural}/${id}`, { priority });
+      return unwrapRecords(json)[0] ?? null;
+    } catch (error) {
+      if (error instanceof TwentyHttpError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
   async createRecord(
     plural: string,
     data: Record<string, unknown>,
@@ -240,22 +256,38 @@ export class TwentyClient {
     priority: Priority = 'background',
     pageSize = 60,
   ): AsyncGenerator<TwentyRecord[], void, void> {
+    // Validate now, not on the first iteration: a bad call fails where it is made.
+    assertPlural(plural);
+    if (Number.isNaN(Date.parse(sinceIso)))
+      throw new TypeError('sinceIso must be an ISO timestamp');
+    return paginate<TwentyRecord>((cursor) =>
+      this.listUpdatedSincePage(plural, sinceIso, { after: cursor, priority, pageSize }),
+    );
+  }
+
+  /**
+   * One page of `listUpdatedSince`, starting after `after` (Twenty's `endCursor` of the previous page of the
+   * SAME query). For callers that must persist their position between pages and resume after a restart.
+   */
+  async listUpdatedSincePage(
+    plural: string,
+    sinceIso: string,
+    o: { after?: string | null; priority?: Priority; pageSize?: number } = {},
+  ): Promise<Page<TwentyRecord>> {
     assertPlural(plural);
     if (Number.isNaN(Date.parse(sinceIso)))
       throw new TypeError('sinceIso must be an ISO timestamp');
     const since = new Date(sinceIso).toISOString();
-    return paginate<TwentyRecord>(async (cursor): Promise<Page<TwentyRecord>> => {
-      const json = await this.request('GET', `/rest/${plural}`, {
-        query: {
-          filter: `updatedAt[gt]:"${since}"`,
-          order_by: 'updatedAt[AscNullsFirst]',
-          limit: pageSize,
-          starting_after: cursor ?? undefined,
-        },
-        priority,
-      });
-      return { items: unwrapRecords(json), nextCursor: nextCursorOf(json) };
+    const json = await this.request('GET', `/rest/${plural}`, {
+      query: {
+        filter: `updatedAt[gt]:"${since}"`,
+        order_by: 'updatedAt[AscNullsFirst]',
+        limit: o.pageSize ?? 60,
+        starting_after: o.after ?? undefined,
+      },
+      priority: o.priority ?? 'background',
     });
+    return { items: unwrapRecords(json), nextCursor: nextCursorOf(json) };
   }
 }
 

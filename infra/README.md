@@ -283,3 +283,78 @@ unset TOKEN_STAFF TOKEN_CARE FOLD_M0_STAFF_PASSWORD FOLD_M0_CARE_PASSWORD
 
 Write the result of each surface (status, and **only** "leak" or "no leak") in the `care-permissions` rows of `docs/verification-status.md`. Any leak
 means a real congregation must not be hosted on this until it is fixed and the whole of section 5 (or `care-permissions-api`) passes.
+
+## 6. The community service: API and worker
+
+`apps/community-api` runs as three containers from one image:
+
+| Service | What it does |
+|---|---|
+| `community-setup` | Runs once per `up`, then exits: creates the database roles, applies migrations, and provisions the church with its Twenty key. Safe to repeat |
+| `community-api` | HTTP on port 4000: `GET /healthz`, `GET /readyz`, `POST /v1/connection-card`, `POST /v1/webhooks/twenty/<slug>` |
+| `community-worker` | Sends queued writes to Twenty, applies webhook hints, re-reads changes hourly, does daily housekeeping. Never messages a person |
+
+### 6.1 Configure and start
+
+Add to `infra/.env`. Generate each secret separately; any characters are fine:
+
+```sh
+cd ~/TheFold
+for v in FOLD_APP_DB_PASSWORD FOLD_MIGRATOR_DB_PASSWORD FOLD_KEK; do echo "$v=$(openssl rand -base64 32)" >> infra/.env; done
+# then edit infra/.env:
+#   FOLD_TENANT_SLUG=grace                 # lowercase; the church's id in URLs
+#   FOLD_TENANT_NAME=Grace Fellowship (test)
+#   FOLD_TENANT_TIMEZONE=America/Chicago
+#   FOLD_TWENTY_API_KEY=<the "The Fold service account" key from step 2>
+docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --build
+docker compose -f infra/docker-compose.yml --env-file infra/.env logs community-setup     # ends with setup.tenant_ready
+curl -s localhost:4000/readyz                                                              # {"ok":true}
+```
+
+Until these three secrets are set, `community-setup` stops with a message naming what is missing (`docker compose ... logs
+community-setup`) and the API and worker do not start; Twenty is unaffected.
+
+**Back up `FOLD_KEK` together with the database.** It encrypts care text and each church's Twenty key; without it that data
+cannot be read. Without `FOLD_TENANT_SLUG`, setup only migrates, and the worker waits (it logs `worker.tenant_not_configured`).
+
+To rotate the Twenty key: change `FOLD_TWENTY_API_KEY`, run `up -d` again (setup stores it as a new version), and the worker picks
+it up within five minutes.
+
+### 6.2 Check the welcome flow end to end (fake data only)
+
+```sh
+curl -s -X POST localhost:4000/v1/connection-card -H 'content-type: application/json' -d '{
+  "firstName": "Sam", "lastName": "Smoke", "email": "sam.smoke@example.com",
+  "householdMembers": [{ "firstName": "Kit", "isChild": true }],
+  "contactConsent": { "byEmail": true }
+}'                                                     # {"received":true}
+docker compose -f infra/docker-compose.yml --env-file infra/.env logs --tail 20 community-worker   # worker.tick ... outboxDone
+```
+
+In Twenty you should then see **Sam Smoke** and **Kit Smoke** (a minor, do-not-contact) in one household, an attendance for today, and three
+follow-ups (Welcome, Invite, Check in). Without a welcomer they have no owner; to test assignment, add a welcomer first:
+
+```sh
+docker compose -f infra/docker-compose.yml --env-file infra/.env exec community-db psql -U postgres community -c "
+  SELECT set_config('app.tenant_id', (SELECT id::text FROM tenant WHERE slug = 'grace'), false);
+  INSERT INTO welcomer_load (tenant_id, twenty_person_id) VALUES (fold_current_tenant(), '<a Twenty person id>');"
+```
+
+The answer is `{"received":true}` whether the person was new, already known, or sent the same card twice: a stranger cannot use the
+form to check who belongs to a church.
+
+### 6.3 Twenty webhooks (optional, UNVERIFIED payload)
+
+Without webhooks the worker still picks up changes made in Twenty, at the hourly reconcile. With them, within seconds:
+
+1. Pick a secret (`openssl rand -hex 24`), put it in `FOLD_TWENTY_WEBHOOK_SECRET`, and run `up -d` again.
+2. In Twenty, **Settings → APIs & Webhooks → Webhooks**: create one with the URL `http://community-api:4000/v1/webhooks/twenty/<slug>`
+   (Twenty reaches the service inside the compose network) and the same secret. Menu names can differ by version; if Twenty generates
+   its own secret instead, put that one in `.env`. If Twenty refuses a plain-`http` or internal URL, note the exact message in the
+   ledger: that decides whether webhooks need a TLS endpoint in front of the service.
+3. Change a test person in Twenty and look for `webhook.hint` (at `FOLD_LOG_LEVEL=debug`) or `webhook.rejected` in the API log.
+
+The signature check (`X-Twenty-Webhook-Signature` over `"<timestamp>.<body>"`) and the payload shape (`eventName: "person.updated"`,
+`record.id`) come from documentation, not from a live Twenty. A `webhook.rejected ... BAD_SIGNATURE` for real deliveries means the signed
+string differs (fix `defaultSignedPayload` in `packages/twenty-client/src/webhook.ts`); `IGNORED` answers mean the payload differs
+(fix `src/http/webhookPayload.ts`). Record what you see in `docs/verification-status.md`.

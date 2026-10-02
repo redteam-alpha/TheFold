@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "claude/**"]
+    branches: [main, 'claude/**']
   pull_request:
 
 permissions:
@@ -56,7 +56,7 @@ jobs:
     env:
       FOLD_TEST_ADMIN_URL: postgres://postgres@localhost:5432/postgres
       # A missing database is a failure here, never a silent skip.
-      FOLD_REQUIRE_DB: "1"
+      FOLD_REQUIRE_DB: '1'
     steps:
       - uses: actions/checkout@v4
       # The pnpm version comes from "packageManager" in package.json. Passing `version:` here as well makes the
@@ -79,12 +79,35 @@ jobs:
           TWENTY_DB_PASSWORD: ci
           ENCRYPTION_KEY: ci
           COMMUNITY_DB_PASSWORD: ci
+          FOLD_KEK: ci
+          FOLD_APP_DB_PASSWORD: ci
+          FOLD_MIGRATOR_DB_PASSWORD: ci
         run: docker compose -f infra/docker-compose.yml config -q
       - name: Refuses to start without secrets (no default passwords)
         run: |
           if docker compose -f infra/docker-compose.yml config -q 2>/dev/null; then
             echo "compose must require its secrets"; exit 1
           fi
+
+  image:
+    name: Community service image builds and starts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build
+        run: docker build -f apps/community-api/Dockerfile -t thefold/community-api:ci .
+      # Proves the image resolves every module (tsx, the workspace packages) and reads its settings:
+      # no command prints usage (exit 64); `api` without settings names what is missing (exit 78).
+      - name: Smoke-run the entrypoint
+        run: |
+          set +e
+          docker run --rm thefold/community-api:ci help; usage=$?
+          docker run --rm thefold/community-api:ci api 2> config.err; config=$?
+          set -e
+          cat config.err
+          test "$usage" = 64
+          test "$config" = 78
+          grep -q FOLD_KEK config.err
 
   secrets:
     name: Secret scan

@@ -280,6 +280,41 @@ describe('batching and reconcile paging', () => {
     const updated = await client.updateRecord('people', created.id, { name: 'b' });
     expect(updated).toMatchObject({ id: created.id, name: 'b' });
   });
+
+  it('reads one record by id, and answers null (not an error) once it is gone', async () => {
+    const { client } = setup();
+    const created = await client.createRecord('people', { name: 'a' });
+    expect(await client.getRecord('people', created.id)).toMatchObject({
+      id: created.id,
+      name: 'a',
+    });
+    await client.deleteRecord('people', created.id);
+    expect(await client.getRecord('people', created.id)).toBeNull();
+    await expect(client.getRecord('people', 'not-an-id')).rejects.toThrow(TypeError);
+  });
+
+  it('pages by hand from a saved cursor, the way a resumed reconcile does', async () => {
+    const { client } = setup();
+    await client.batchCreate(
+      'people',
+      Array.from({ length: 5 }, (_, i) => ({ name: `p${i}` })),
+    );
+    const since = '2020-01-01T00:00:00Z';
+    const first = await client.listUpdatedSincePage('people', since, { pageSize: 2 });
+    expect(first.items.map((r) => r['name'])).toEqual(['p0', 'p1']);
+    expect(first.nextCursor).toBeTruthy();
+    const second = await client.listUpdatedSincePage('people', since, {
+      pageSize: 2,
+      after: first.nextCursor,
+    });
+    expect(second.items.map((r) => r['name'])).toEqual(['p2', 'p3']);
+    const last = await client.listUpdatedSincePage('people', since, {
+      pageSize: 2,
+      after: second.nextCursor,
+    });
+    expect(last.items.map((r) => r['name'])).toEqual(['p4']);
+    expect(last.nextCursor).toBeNull();
+  });
 });
 
 describe('unwrapRecords', () => {
