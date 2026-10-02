@@ -111,9 +111,9 @@ Each row names the harness check and the **one place** in our code that changes 
 | Invitation email reaches Mailpit once the **worker** has the `EMAIL_*` settings (it sends queued email; the server alone is not enough) | ✅ | invite a test member, look in http://localhost:8025 | `infra/docker-compose.yml` (worker environment). Observed 2026-10-01: with the settings on the server only, **no invitation reached Mailpit** (the email queue showed 5 completed jobs and the inbox was empty). After `39bcdd8` and the step-1 `up -d`, which recreated only `twenty-worker`, the resent invitations were logged by the worker as `[SmtpDriver] Email to '…' successfully sent` and 4 messages were in Mailpit. Invitations sent before the fix are not retried: resend them |
 | Webhook payload shape and what a Person merge does to ids/events | ❓ | manual `person-merge` | webhook adapter; `person_alias` handling |
 | Twenty's webhook body names the event as `eventName: "<object>.<action>"` with the record under `record` (the community API's receiver reads this, and tolerates `event`/`type`, `objectMetadata.nameSingular`, `data`) | ❓ | manual: `infra/README.md` 6.3; an `IGNORED` answer for a real delivery means the shape differs | `apps/community-api/src/http/webhookPayload.ts` |
-| `GET /rest/<plural>/<id>` returns the record (unwrapped like a list) and 404 once it is deleted | ❓ (the fake server answers `{data: {record}}`) | the worker's refetch on the VM: a person changed in Twenty appears in `person_read`; a deleted one is marked deleted | `TwentyClient.getRecord` |
-| The worker reaches Twenty at `http://twenty-server:3000` inside the compose network with the service-account key (no host-based workspace lookup) | ❓ | `infra/README.md` 6.2: the card's people and follow-ups appear in Twenty | `FOLD_TWENTY_BASE_URL` |
-| The community service's own flow (setup → API → worker → Twenty) works against a real Twenty | ❓ | `infra/README.md` 6.2. Seen in the sandbox (2026-10-02) against the fake Twenty over HTTP: setup on a fresh database, a card → 2 people, 1 attendance, 3 follow-ups, all outbox jobs `DONE`; a signed webhook queued, a forged one 401; SIGTERM stops both cleanly | `apps/community-api` |
+| `GET /rest/<plural>/<id>` returns the record (unwrapped like a list) and 404 once it is deleted | ✅ the shape, by hand; ❓ the worker's refetch | by hand with the admin key on a throwaway household (2026-10-02): `200` `{data: {household: {…}}}`, keyed by the object's singular name, which `unwrapRecords` handles; after `DELETE` (a soft delete), and for an unknown id, `404` `NotFoundException: Record not found`. The fake server answers `{data: {record}}`. Still to see: the worker's refetch on the VM (a person changed in Twenty appears in `person_read`; a deleted one is marked deleted), which needs a webhook or the hourly reconcile | `TwentyClient.getRecord` |
+| The worker reaches Twenty at `http://twenty-server:3000` inside the compose network with the service-account key (no host-based workspace lookup) | ✅ | `infra/README.md` 6.2 on the VM (2026-10-02, run log): the card's people, household, attendance and follow-ups appeared in Twenty, created by `SERVICE_ACCOUNT_KEY` | `FOLD_TWENTY_BASE_URL` |
+| The community service's own flow (setup → API → worker → Twenty) works against a real Twenty | ✅ for setup, the connection card and its writes; ❓ webhooks, welcomer assignment, refetch | `infra/README.md` 6.1 and 6.2 on the VM (2026-10-02, run log): setup on the existing community database, a card → 2 people in 1 household, 1 attendance, 3 follow-ups, all 5 outbox jobs `DONE` at the first attempt; the same card again created nothing. Earlier, in the sandbox (2026-10-02) against the fake Twenty over HTTP: setup on a fresh database, a card → 2 people, 1 attendance, 3 follow-ups, all outbox jobs `DONE`; a signed webhook queued, a forged one 401; SIGTERM stops both cleanly | `apps/community-api` |
 | Workspace creation and app install can be scripted | ❓ | manual `multi-workspace` | provisioner (ADR 0002) |
 | `IS_MULTIWORKSPACE_ENABLED` is licensed/allowed for self-hosters | ❓ | manual `multi-workspace` | ADR 0002 (cells vs shared workspaces) |
 | Everything works with **no** enterprise key | ❓ | manual `no-enterprise-key` | `docs/enterprise-avoid.md` |
@@ -131,7 +131,7 @@ Each row names the harness check and the **one place** in our code that changes 
 
 | Item | Status |
 |---|---|
-| Community API and worker | ✅ built (2026-10-02, ADR 0006): connection-card intake, Twenty webhook receiver, outbox/refetch/reconcile/housekeeping worker, setup and provisioning, Docker image and compose services. Not built: portal sign-in, portal read APIs, escalation sweeps for overdue follow-ups, metrics. Against a real Twenty: ❓ (section 4) |
+| Community API and worker | ✅ built (2026-10-02, ADR 0006): connection-card intake, Twenty webhook receiver, outbox/refetch/reconcile/housekeeping worker, setup and provisioning, Docker image and compose services. Not built: portal sign-in, portal read APIs, escalation sweeps for overdue follow-ups, metrics. Against a real Twenty: the card flow ✅, webhooks and refetch ❓ (section 4) |
 | Member portal UI | ⏳ (`apps/portal-web` is not started) |
 | Email delivery, unsubscribe/bounce handling, DSAR export/erase | ⏳ |
 | Provisioner (workspace/cell creation) | ⏳ (blocked on the M0 answers above). Must also deactivate Twenty's two sample workflows, which every new workspace ships active (see the `workflow-bypass` entry); until then it is a manual step in `infra/README.md` step 1 |
@@ -142,6 +142,28 @@ Each row names the harness check and the **one place** in our code that changes 
 ## 6. M0 run log
 
 Paste each `pnpm m0` table here (newest first) with the date and the Twenty version, and update the ❓ rows above.
+
+### Community service first start and M0 run — 2026-10-02 (eighth) — Twenty v2.43.0 — at `8918939` — **8 PASS · 0 FAIL · 1 INFO · 2 SKIP · 8 MANUAL**
+
+`8918939` added the community service to the compose file. `infra/README.md` 6.1 and 6.2 were followed on the VM, then the harness was run again.
+
+| Step | Observed |
+|---|---|
+| `up -d --build` with the three new secrets, `FOLD_TENANT_SLUG=grace` and the service-account key in `infra/.env` | the image built; `community-setup` exited 0; `community-api` healthy, `community-worker` up. The six existing containers were **not** recreated |
+| `community-setup` log | `setup.bootstrapped`, `setup.migrated` (4 migrations applied, 0 already applied), `setup.tenant_ready` (`apiKeyVersion` 1, no webhook secret) |
+| `GET localhost:4000/readyz` and `/healthz` | `200 {"ok":true}` |
+| First worker tick | `reconciledPeople: 1`, `errors: 0`: the worker read Twenty at `http://twenty-server:3000` with the service-account key |
+| `POST /v1/connection-card` (6.2: the fake "Sam Smoke" with a child "Kit") | `202 {"received":true}`; API log `card.received … QUEUED, NEW`; four seconds later `worker.tick … outboxDone: 5`; the outbox holds 5 jobs, all `DONE` after 1 attempt |
+| In Twenty (read with the admin key) | Sam: email set, `consentEmail` true, household primary contact. Kit: `isMinor` and `doNotContact` true, no email, `guardianId` = Sam. Both `NEW_GUEST` in one "Smoke household". One `SERVICE` attendance for 2026-10-02. Three open follow-ups (`WELCOME` due in 2 days, `GROUP_INTRO` in 7, `FOLLOW_UP` in 21) with `ownerId` null, as expected with no welcomer |
+| Read model | `person_read` has the same 3 people as Twenty (the two above and one that was already there) |
+| The same card again, the email typed with capitals and spaces | `202 {"received":true}`; `card.received … DUPLICATE, EXISTING`; no new outbox job; Twenty still has 3 people, 1 household, 1 attendance, 3 follow-ups |
+| `pnpm m0` afterwards | every row as in the seventh run; no `cleanup` row; the worker logged no error while the harness created and deleted its records |
+
+The README says the card answers `{"received":true}`; the status with it is `202`.
+
+Not exercised: webhooks (6.3: no secret is set and none is registered in Twenty), welcomer assignment against a real person, the worker's refetch and
+the hourly reconcile of a changed or deleted person, key rotation, and stopping the containers. Sam and Kit Smoke, their household, attendance and
+follow-ups were left in the workspace as fake test data.
 
 ### M0 run — 2026-10-02 (seventh) — Twenty v2.43.0 — service account, with the two test users — **8 PASS · 0 FAIL · 1 INFO · 2 SKIP · 8 MANUAL**
 
