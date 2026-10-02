@@ -143,6 +143,24 @@ Each row names the harness check and the **one place** in our code that changes 
 
 Paste each `pnpm m0` table here (newest first) with the date and the Twenty version, and update the ❓ rows above.
 
+### M0 run — 2026-10-02 (seventh) — Twenty v2.43.0 — service account, with the two test users — **8 PASS · 0 FAIL · 1 INFO · 2 SKIP · 8 MANUAL**
+
+A routine re-run at `c0734b6` with no code change since the sixth: the stack had been up for 37 hours (all six services up, `twenty-server` healthy)
+and the same keys and test users still worked. Nothing differs from the sixth run, and there is no `cleanup` row. Just before it, the harness was
+run once without the two test users' passwords: the same seven PASS and one INFO, with `care-permissions-api` at SKIP (7 PASS · 0 FAIL · 1 INFO ·
+3 SKIP · 8 MANUAL), which is what the harness is meant to report when those variables are not set.
+
+| Status | Check | Observed |
+|---|---|---|
+| PASS | `health`, `auth-and-rest`, `app-installed`, `sourceref-idempotent`, `select-defaults`, `person-shapes`, `batch-limit-and-paging` | as in the sixth run |
+| **PASS** | `care-permissions-api` | as in the sixth run, word for word: REST list, by id and create denied (HTTP 400, permission refusal); REST person with relations: nothing returned; GraphQL `careRequests`: denied (GraphQL error); global search: care requests only denied, people only nothing returned, every object denied; timeline of the care request and of the person: nothing returned. The Care team user could read it (control) |
+| INFO | `batch-61` | accepted 61 records in one request |
+| SKIP | `rate-limit`, `webhook-signature` | opt-in checks not enabled |
+| MANUAL | 8 checks | not done in this run |
+
+No ❓ row changes: this run observed nothing new. Still open before a real congregation goes on this instance: the browser half of
+`care-permissions`, and whether a workflow acts with more rights than the user who set it off.
+
 ### M0 run — 2026-10-02 (sixth) — Twenty v2.43.0 — service account, with the two test users — **8 PASS · 0 FAIL · 1 INFO · 2 SKIP · 8 MANUAL**
 
 The first run after `980b4f1`, which counts a 400 or a GraphQL error as a refusal only when its text says `PERMISSION_DENIED` or `FORBIDDEN`. Against
