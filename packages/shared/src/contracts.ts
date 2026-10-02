@@ -127,10 +127,18 @@ export const webhookHintSchema = z.object({
 export type WebhookHint = z.infer<typeof webhookHintSchema>;
 
 /**
- * Jobs the outbox sends to Twenty. `idempotencyKey` is written to the Twenty record's `sourceRef`
- * so a retry after a timeout finds the record instead of creating a second one.
+ * Jobs the outbox runs: writes to Twenty, and email to members. For Twenty writes, `idempotencyKey` is
+ * written to the Twenty record's `sourceRef` so a retry after a timeout finds the record instead of creating
+ * a second one.
  */
 export const outboxJobSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('mail.signInLink'),
+    idempotencyKey: z.string().min(1).max(200),
+    /** Normalised (lower case). The worker decides whether this address gets a link; the requester never learns. */
+    email: z.email().max(254),
+    requestedIp: z.string().max(64).nullable(),
+  }),
   z.object({
     kind: z.literal('twenty.createFollowUp'),
     idempotencyKey: z.string().min(1).max(200),

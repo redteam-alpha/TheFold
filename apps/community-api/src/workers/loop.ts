@@ -10,8 +10,9 @@ import { processRefetches } from '../sync/refetch.js';
 import { reconcileObject } from '../sync/reconcile.js';
 import { SYNCED_OBJECTS } from '../sync/apply.js';
 import { TenantNotConfiguredError } from '../tenants/runtime.js';
+import { pruneSignIns } from '../portal/signIn.js';
 import type { TwentyGateway } from '../twenty/gateway.js';
-import { processOutbox } from './outbox.js';
+import { processOutbox, type MailDeps } from './outbox.js';
 
 /** Where the worker gets each church's Twenty connection (TwentyConnections in production, fakes in tests). */
 export interface TwentyAccess {
@@ -27,6 +28,8 @@ export interface WorkerOptions {
   housekeepingEveryMs?: number;
   /** Outbox batches per church per tick, so one busy church cannot starve the others. */
   maxOutboxRounds?: number;
+  /** Member email (sign-in links). Null: those jobs wait and retry until SMTP is configured. */
+  mail?: MailDeps | null;
   now?: () => Date;
 }
 
@@ -48,7 +51,8 @@ const WEBHOOK_DELIVERY_RETENTION_DAYS = 14;
  * and does daily housekeeping.
  *
  * Each step is isolated: a failure is logged and the next step, and the next church, still run. Nothing here
- * contacts a congregant (CLAUDE.md rule 6): the worker creates tasks for people, it never messages anyone.
+ * reaches out to a congregant (CLAUDE.md rule 6): the worker creates tasks for people. The only email it sends
+ * is one a person asked for themselves, a sign-in link.
  *
  * Several workers can run at once: the outbox and the inbox are claimed with SKIP LOCKED, and a reconcile is
  * claimed by stamping its start time.
@@ -107,7 +111,10 @@ export class Worker {
       const gw = gateway;
       await step('outbox', async () => {
         for (let round = 0; round < (this.o.maxOutboxRounds ?? 10); round++) {
-          const b = await processOutbox(this.o.pool, tenantId, gw, { now: this.now() });
+          const b = await processOutbox(this.o.pool, tenantId, gw, {
+            now: this.now(),
+            mail: this.o.mail ?? null,
+          });
           r.outbox.done += b.done;
           r.outbox.retried += b.retried;
           r.outbox.dead += b.dead;
@@ -145,6 +152,7 @@ export class Worker {
         await withTenant(this.o.pool, tenantId, async (c) => {
           await expirePrayerRequests(c, at);
           await pruneWebhookDeliveries(c, WEBHOOK_DELIVERY_RETENTION_DAYS);
+          await pruneSignIns(c, at);
         });
         this.lastHousekeeping.set(tenantId, at.getTime());
         r.housekeeping = true;

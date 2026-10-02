@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   canViewPrayer,
@@ -6,6 +7,7 @@ import {
   decidePortalLink,
   findMatches,
   levenshtein,
+  mayReceiveSignInLink,
   nameSimilarity,
   normalizeEmail,
   normalizePhone,
@@ -192,6 +194,68 @@ describe('decidePortalLink', () => {
       decidePortalLink('who@example.com', [p({ id: 's', emails: ['sam@example.com'] })]),
     ).toEqual({ decision: 'NO_MATCH' });
     expect(decidePortalLink('garbage', [])).toEqual({ decision: 'NO_MATCH' });
+  });
+});
+
+describe('portal sign-in properties (who an emailed link may reach, and who it links to)', () => {
+  const EMAILS = ['a@example.com', 'b@example.com', 'family@example.com'];
+  const person = fc.record({
+    id: fc.uuid(),
+    emails: fc.subarray(EMAILS),
+    isMinor: fc.boolean(),
+    sharedEmail: fc.boolean(),
+  });
+  const people = fc
+    .uniqueArray(person, { selector: (x) => x.id, maxLength: 6 })
+    .map((xs) => xs.map((x) => p(x)));
+  const email = fc.constantFrom(...EMAILS, 'nobody@example.com', 'not an email');
+
+  it('never links an account to a minor, a shared address, or one of several owners', () => {
+    fc.assert(
+      fc.property(email, people, (e, ps) => {
+        const d = decidePortalLink(e, ps);
+        if (d.decision !== 'AUTO_LINK') return;
+        const owners = ps.filter((x) => x.emails.includes(e));
+        const linked = ps.find((x) => x.id === d.personId);
+        expect(linked?.isMinor).toBe(false);
+        expect(linked?.sharedEmail).toBe(false);
+        expect(owners.filter((x) => !x.isMinor)).toHaveLength(1);
+      }),
+    );
+  });
+
+  it('decides the same way whatever order the records come in', () => {
+    fc.assert(
+      fc.property(email, people, fc.integer(), (e, ps, seed) => {
+        const shuffled = [...ps].sort(
+          (x, y) => ((x.id.charCodeAt(0) * seed) % 7) - ((y.id.charCodeAt(0) * seed) % 7),
+        );
+        expect(decidePortalLink(e, shuffled)).toEqual(decidePortalLink(e, ps));
+        expect(mayReceiveSignInLink(e, shuffled)).toBe(mayReceiveSignInLink(e, ps));
+      }),
+    );
+  });
+
+  it('emails a link only when an adult in the records uses the address', () => {
+    fc.assert(
+      fc.property(email, people, (e, ps) => {
+        const adultOwner = ps.some((x) => !x.isMinor && x.emails.includes(e));
+        expect(mayReceiveSignInLink(e, ps)).toBe(adultOwner);
+        // Whenever a link is emailed, the account it creates links to someone or goes to a human.
+        if (adultOwner) expect(decidePortalLink(e, ps).decision).not.toBe('NO_MATCH');
+      }),
+    );
+  });
+
+  it('never emails a child’s own address, even in upper case', () => {
+    expect(
+      mayReceiveSignInLink('Kid@Example.com', [
+        p({ id: 'kid', emails: ['kid@example.com'], isMinor: true }),
+      ]),
+    ).toBe(false);
+    expect(
+      mayReceiveSignInLink(' Mom@Example.com ', [p({ id: 'mom', emails: ['mom@example.com'] })]),
+    ).toBe(true);
   });
 });
 

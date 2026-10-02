@@ -199,3 +199,16 @@ export function decidePortalLink(
   if (owners.length === 0) return { decision: 'NO_MATCH' };
   return { decision: 'NEEDS_STAFF_CONFIRMATION', candidateIds: owners.map((p) => p.id).sort() };
 }
+
+/**
+ * Whether a sign-in link may be emailed to `email` at all: only when an adult in the church's records uses
+ * that address. A child's own address never gets one (children have no portal account; parents manage them),
+ * and an address nobody in the records uses gets nothing, so the sign-in form cannot be used to send mail to
+ * strangers. The sign-in form answers the same either way, so this never tells anyone who belongs.
+ */
+export function mayReceiveSignInLink(email: string, people: readonly PersonIdentity[]): boolean {
+  const e = normalizeEmail(email);
+  return (
+    e !== null && people.some((p) => !p.isMinor && p.emails.some((x) => normalizeEmail(x) === e))
+  );
+}

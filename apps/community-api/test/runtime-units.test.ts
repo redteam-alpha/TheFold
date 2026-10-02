@@ -2,7 +2,7 @@
 import type { TwentyRecord } from '@thefold/twenty-client';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { ConfigError, loadServiceConfig, loadSetupConfig } from '../src/config.js';
+import { ConfigError, loadServiceConfig, loadSetupConfig, publicUrlFor } from '../src/config.js';
 import { WindowLimiter } from '../src/http/rateLimit.js';
 import { subdomainFromHost } from '../src/http/tenantResolution.js';
 import { verifyTurnstile } from '../src/http/turnstile.js';
@@ -25,6 +25,40 @@ describe('configuration', () => {
     expect(c.turnstileSecret).toBeNull();
     expect(c.worker).toEqual({ pollMs: 5000, reconcileEveryMs: 3_600_000 });
     expect(c.kek).toHaveLength(32);
+  });
+
+  it('switches sign-in off without SMTP, and needs a From address and a public address with it', () => {
+    expect(loadServiceConfig(base).mail).toBeNull();
+    const mail = { FOLD_SMTP_HOST: 'mailpit', FOLD_SMTP_PORT: '1025' };
+    expect(() => loadServiceConfig({ ...base, ...mail })).toThrow(
+      /FOLD_MAIL_FROM[\s\S]*FOLD_PUBLIC_URL/,
+    );
+    const c = loadServiceConfig({
+      ...base,
+      ...mail,
+      FOLD_MAIL_FROM: 'The Fold <no-reply@thefold.test>',
+      FOLD_PUBLIC_URL: 'http://192.168.51.10:4000/',
+      FOLD_SMTP_PASSWORD: '',
+    });
+    expect(c.mail).toEqual({
+      smtp: {
+        host: 'mailpit',
+        port: 1025,
+        secure: false,
+        user: null,
+        password: null,
+        from: 'The Fold <no-reply@thefold.test>',
+      },
+      publicUrl: 'http://192.168.51.10:4000',
+      signInRateLimit: 10,
+    });
+    const multi = loadServiceConfig({
+      ...base,
+      ...mail,
+      FOLD_MAIL_FROM: 'x <no-reply@thefold.test>',
+      FOLD_BASE_DOMAIN: 'thefold.app',
+    });
+    expect(publicUrlFor(multi.mail?.publicUrl ?? '', 'grace')).toBe('https://grace.thefold.app');
   });
 
   it('treats an empty variable as unset (compose passes `X=` through)', () => {

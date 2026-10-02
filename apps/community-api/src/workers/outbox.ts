@@ -5,12 +5,23 @@ import { upsertPersonRead } from '../db/readModels.js';
 import { assignWelcome } from '../intake/assignment.js';
 import { claimOutbox, completeOutbox, failOutbox, type ClaimedJob } from '../db/outbox.js';
 import { withTenant } from '../db/tenant.js';
+import type { Mailer } from '../mail/mailer.js';
+import { signInEmail } from '../mail/signInEmail.js';
+import { prepareSignInLink, SIGN_IN_LINK_TTL_MS } from '../portal/signIn.js';
 import type { GuestUpsertResult, TwentyGateway } from '../twenty/gateway.js';
+
+/** How the worker sends member email. Absent: sign-in jobs fail and retry until it is configured. */
+export interface MailDeps {
+  mailer: Mailer;
+  /** The church's public address, e.g. `https://grace.thefold.app` (no trailing slash). */
+  publicUrl: (subdomain: string) => string;
+}
 
 export interface ProcessOptions {
   limit?: number;
   leaseSeconds?: number;
   now?: Date;
+  mail?: MailDeps | null;
 }
 
 export interface ProcessReport {
@@ -44,7 +55,7 @@ export async function processOutbox(
 
   for (const claimed of jobs) {
     try {
-      await runJob(pool, tenantId, gateway, claimed, now);
+      await runJob(pool, tenantId, gateway, claimed, now, opts.mail ?? null);
       report.done++;
     } catch (error) {
       const outcome = await withTenant(pool, tenantId, (c) =>
@@ -63,9 +74,27 @@ async function runJob(
   gateway: TwentyGateway,
   claimed: ClaimedJob,
   now: Date,
+  mail: MailDeps | null,
 ): Promise<void> {
   const { job } = claimed;
   switch (job.kind) {
+    case 'mail.signInLink': {
+      if (!mail) throw new Error('email is not configured (FOLD_SMTP_HOST)');
+      const prepared = await withTenant(pool, tenantId, (c) =>
+        prepareSignInLink(c, { email: job.email, ip: job.requestedIp, now }),
+      );
+      // Sent after the link is committed: a failed send retries the job, which makes a fresh link.
+      if (prepared.send)
+        await mail.mailer.send(
+          signInEmail({
+            to: job.email,
+            churchName: prepared.churchName,
+            link: `${mail.publicUrl(prepared.subdomain)}/sign-in/confirm?token=${prepared.token}`,
+            minutes: SIGN_IN_LINK_TTL_MS / 60_000,
+          }),
+        );
+      break;
+    }
     case 'twenty.createFollowUp': {
       await gateway.createFollowUp(claimed.idempotencyKey, job.followUp);
       break;

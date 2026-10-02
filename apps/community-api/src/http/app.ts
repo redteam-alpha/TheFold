@@ -10,6 +10,7 @@ import { recordWebhookHint } from '../db/webhookInbox.js';
 import { submitConnectionCard } from '../intake/connectionCard.js';
 import { errorFields, type Logger } from '../log.js';
 import { readTenantSecret } from '../tenants/secrets.js';
+import { mountPortal, type PortalOptions } from './portal.js';
 import { WindowLimiter } from './rateLimit.js';
 import { subdomainFromHost } from './tenantResolution.js';
 import { verifyTurnstile } from './turnstile.js';
@@ -28,6 +29,8 @@ export interface ApiDeps {
   fetch?: typeof fetch;
   /** The peer address. Defaults to the Node socket's; tests pass their own. */
   remoteAddress?: (c: Context) => string | null;
+  /** Member sign-in (ADR 0007). Null or absent: email is not configured, and sign-in says so. */
+  portal?: PortalOptions | null;
 }
 
 const TEN_MINUTES = 10 * 60_000;
@@ -64,6 +67,11 @@ export function buildApi(deps: ApiDeps): Hono {
 
   const tenantOf = async (subdomain: string | null): Promise<string | null> =>
     subdomain ? tenantIdForSubdomain(deps.pool, subdomain) : null;
+  const hostOf = (c: Context): string | undefined =>
+    (deps.trustProxy && c.req.header('x-forwarded-host')) || c.req.header('host');
+  /** The church a request is for, from its Host (`grace.thefold.app`), or the single-church default. */
+  const tenantOfRequest = (c: Context) =>
+    tenantOf(subdomainFromHost(hostOf(c), deps.tenancy.baseDomain, deps.tenancy.defaultSubdomain));
 
   app.get('/healthz', (c) => c.json({ ok: true }));
   app.get('/readyz', async (c) => {
@@ -82,10 +90,7 @@ export function buildApi(deps: ApiDeps): Hono {
    * belongs to a church.
    */
   app.post('/v1/connection-card', bodyLimit({ maxSize: 32 * 1024 }), async (c) => {
-    const host = (deps.trustProxy && c.req.header('x-forwarded-host')) || c.req.header('host');
-    const tenantId = await tenantOf(
-      subdomainFromHost(host, deps.tenancy.baseDomain, deps.tenancy.defaultSubdomain),
-    );
+    const tenantId = await tenantOfRequest(c);
     if (!tenantId) return c.json({ error: 'unknown church' }, 404);
 
     const ip = clientIp(c);
@@ -184,6 +189,16 @@ export function buildApi(deps: ApiDeps): Hono {
     );
     deps.log.debug('webhook.hint', { tenantId, objectType: hint.objectType, outcome });
     return c.json({ outcome }, 202);
+  });
+
+  mountPortal(app, {
+    pool: deps.pool,
+    log: deps.log,
+    now,
+    options: deps.portal ?? null,
+    hostOf,
+    tenantOf: tenantOfRequest,
+    clientIp,
   });
 
   return app;

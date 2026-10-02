@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { serve } from '@hono/node-server';
 import { Pool } from 'pg';
-import { ConfigError, loadServiceConfig, loadSetupConfig } from './config.js';
+import { ConfigError, loadServiceConfig, loadSetupConfig, publicUrlFor } from './config.js';
 import { buildApi } from './http/app.js';
 import { createLogger, errorFields, type Logger } from './log.js';
+import { smtpMailer } from './mail/mailer.js';
 import { runSetup } from './setup/setup.js';
 import { TwentyConnections } from './tenants/runtime.js';
 import { Worker } from './workers/loop.js';
@@ -42,7 +43,14 @@ async function api(): Promise<void> {
     trustProxy: cfg.trustProxy,
     turnstileSecret: cfg.turnstileSecret,
     cardRateLimit: cfg.cardRateLimit,
+    portal: cfg.mail
+      ? {
+          secureCookies: cfg.mail.publicUrl.startsWith('https://'),
+          signInRateLimit: cfg.mail.signInRateLimit,
+        }
+      : null,
   });
+  if (!cfg.mail) log.warn('api.signin_disabled', { reason: 'FOLD_SMTP_HOST is not set' });
   const server = serve({ fetch: app.fetch, hostname: cfg.http.host, port: cfg.http.port }, (info) =>
     log.info('api.listening', { host: info.address, port: info.port }),
   );
@@ -59,11 +67,19 @@ async function worker(): Promise<void> {
   const cfg = loadServiceConfig();
   const log = createLogger(cfg.logLevel);
   const pool = appPool(cfg.databaseUrl, log, 5);
+  const mail = cfg.mail;
+  if (!mail) log.warn('worker.mail_disabled', { reason: 'FOLD_SMTP_HOST is not set' });
   const w = new Worker({
     pool,
     twenty: new TwentyConnections(pool, cfg.kek),
     log,
     reconcileEveryMs: cfg.worker.reconcileEveryMs,
+    mail: mail
+      ? {
+          mailer: smtpMailer(mail.smtp),
+          publicUrl: (subdomain) => publicUrlFor(mail.publicUrl, subdomain),
+        }
+      : null,
   });
   await w.run(cfg.worker.pollMs, onShutdown());
   await pool.end();

@@ -373,3 +373,22 @@ What Twenty sends was read from the `v2.43.0` build, not yet seen in a delivery:
 `eventName: "person.updated"`, `objectMetadata.nameSingular` and `record`. A `webhook.rejected ... BAD_SIGNATURE` for real deliveries
 means the signed string differs (fix `defaultSignedPayload` in `packages/twenty-client/src/webhook.ts`); `IGNORED` answers mean the
 payload differs (fix `src/http/webhookPayload.ts`). Record what you see in `docs/verification-status.md`.
+
+### 6.4 Member sign-in (ADR 0007; fake data only)
+
+Members sign in with a link emailed to them; in development every message lands in Mailpit.
+
+1. In `infra/.env`, set `FOLD_PUBLIC_URL` to the address your browser uses for the community API, e.g.
+   `http://192.168.51.10:4000` on the VM. Emailed links point there, and the API refuses form posts whose `Origin` is a
+   different host. Then `up -d --build`.
+2. Open `<FOLD_PUBLIC_URL>/sign-in` and enter the email address of a **fake adult** in Twenty. The person must be in
+   the community database: people created by a connection card are, and others arrive by webhook or the hourly reconcile.
+3. Open Mailpit (`http://<host>:8025`), open "Your sign-in link for …", follow the link and press **Continue**. The page
+   should say "Welcome, <first name>".
+4. Try the cases that must not work:
+   - an address nobody uses, or only a child's record uses: the page says the same, and **no mail** arrives;
+   - the link a second time, or after 15 minutes: "expired or already used";
+   - a shared family address: you are signed in, but the page asks you to see the welcome desk.
+
+`GET /v1/me` with the session cookie answers `{email, link, person}` as JSON. **Sign out** ends the session on the server
+too, not only in the browser.

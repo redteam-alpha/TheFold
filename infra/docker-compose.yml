@@ -164,6 +164,15 @@ services:
       FOLD_BASE_DOMAIN: ${FOLD_BASE_DOMAIN:-}
       FOLD_TURNSTILE_SECRET: ${FOLD_TURNSTILE_SECRET:-}
       FOLD_LOG_LEVEL: ${FOLD_LOG_LEVEL:-info}
+      # Member email (sign-in links, ADR 0007). In development every message lands in Mailpit (port 8025).
+      FOLD_SMTP_HOST: ${FOLD_SMTP_HOST:-mailpit}
+      FOLD_SMTP_PORT: ${FOLD_SMTP_PORT:-1025}
+      FOLD_SMTP_SECURE: ${FOLD_SMTP_SECURE:-false}
+      FOLD_SMTP_USER: ${FOLD_SMTP_USER:-}
+      FOLD_SMTP_PASSWORD: ${FOLD_SMTP_PASSWORD:-}
+      FOLD_MAIL_FROM: '${FOLD_MAIL_FROM:-The Fold (development) <no-reply@thefold.localhost>}'
+      # The address members open, used in emailed links; plain http makes cookies non-Secure (development only).
+      FOLD_PUBLIC_URL: ${FOLD_PUBLIC_URL:-http://localhost:4000}
     depends_on:
       community-setup:
         condition: service_completed_successfully

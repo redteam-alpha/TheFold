@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { z } from 'zod';
 import { kekFromEnv } from './crypto/envelope.js';
+import type { SmtpSettings } from './mail/mailer.js';
 
 type Env = Record<string, string | undefined>;
 
@@ -64,6 +65,28 @@ const serviceSchema = z
     FOLD_TURNSTILE_SECRET: z.string().min(1).optional(),
     /** Connection cards accepted per client IP per 10 minutes. A family filling in cards on one phone needs a few. */
     FOLD_CARD_RATE_LIMIT: int(1, 1000).default(10),
+    /** Sign-in requests accepted per client IP per 10 minutes. */
+    FOLD_SIGNIN_RATE_LIMIT: int(1, 1000).default(10),
+    /** Member email (sign-in links). Unset: sign-in is switched off and says so. */
+    FOLD_SMTP_HOST: z.string().min(1).optional(),
+    FOLD_SMTP_PORT: int(1, 65535).default(587),
+    /** Implicit TLS (port 465). Otherwise STARTTLS is used when the server offers it. */
+    FOLD_SMTP_SECURE: flag.default(false),
+    FOLD_SMTP_USER: z.string().min(1).optional(),
+    FOLD_SMTP_PASSWORD: z.string().min(1).optional(),
+    /** e.g. `"Grace Church via The Fold" <no-reply@thefold.app>` */
+    FOLD_MAIL_FROM: z.string().min(3).optional(),
+    /**
+     * The address members use, for links in email. May contain `{subdomain}`, e.g. `https://{subdomain}.thefold.app`.
+     * Default: `https://{subdomain}.<FOLD_BASE_DOMAIN>`. An `https` address also makes session cookies `Secure`.
+     */
+    FOLD_PUBLIC_URL: z
+      .string()
+      .regex(
+        /^https?:\/\/[^\s/]+(\/[^\s]*)?$/,
+        'an http(s) address, e.g. https://{subdomain}.thefold.app',
+      )
+      .optional(),
     FOLD_WORKER_POLL_MS: int(250, 600_000).default(5000),
     FOLD_RECONCILE_MINUTES: int(1, 24 * 60).default(60),
     FOLD_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
@@ -72,6 +95,15 @@ const serviceSchema = z
     path: ['FOLD_DATABASE_URL'],
     message:
       'set FOLD_DATABASE_URL, or FOLD_DB_HOST with FOLD_APP_DB_PASSWORD (and FOLD_DB_PORT, FOLD_DB_NAME)',
+  })
+  .refine((c) => !c.FOLD_SMTP_HOST || c.FOLD_MAIL_FROM, {
+    path: ['FOLD_MAIL_FROM'],
+    message: 'required with FOLD_SMTP_HOST (the From address of member email)',
+  })
+  .refine((c) => !c.FOLD_SMTP_HOST || c.FOLD_PUBLIC_URL || c.FOLD_BASE_DOMAIN, {
+    path: ['FOLD_PUBLIC_URL'],
+    message:
+      'required with FOLD_SMTP_HOST unless FOLD_BASE_DOMAIN is set (links in email need an address)',
   });
 
 export interface ServiceConfig {
@@ -82,6 +114,13 @@ export interface ServiceConfig {
   turnstileSecret: string | null;
   cardRateLimit: number;
   worker: { pollMs: number; reconcileEveryMs: number };
+  /** Member email and sign-in. Null when FOLD_SMTP_HOST is unset: sign-in is switched off. */
+  mail: {
+    smtp: SmtpSettings;
+    /** With `{subdomain}` where the church's subdomain goes. */
+    publicUrl: string;
+    signInRateLimit: number;
+  } | null;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   /** Key-encryption key for tenant secrets and care text (ADR 0004). Held only in memory. */
   kek: Buffer;
@@ -93,6 +132,10 @@ export class ConfigError extends Error {
     this.name = 'ConfigError';
   }
 }
+
+/** The church's public address from a `FOLD_PUBLIC_URL` template. */
+export const publicUrlFor = (template: string, subdomain: string): string =>
+  template.replaceAll('{subdomain}', subdomain);
 
 /** Names the variable and the rule, never the value: a value may be a secret. */
 function problemsOf(error: z.ZodError): string[] {
@@ -132,6 +175,22 @@ export function loadServiceConfig(env: Env = process.env): ServiceConfig {
     turnstileSecret: c.FOLD_TURNSTILE_SECRET ?? null,
     cardRateLimit: c.FOLD_CARD_RATE_LIMIT,
     worker: { pollMs: c.FOLD_WORKER_POLL_MS, reconcileEveryMs: c.FOLD_RECONCILE_MINUTES * 60_000 },
+    mail: c.FOLD_SMTP_HOST
+      ? {
+          smtp: {
+            host: c.FOLD_SMTP_HOST,
+            port: c.FOLD_SMTP_PORT,
+            secure: c.FOLD_SMTP_SECURE,
+            user: c.FOLD_SMTP_USER ?? null,
+            password: c.FOLD_SMTP_PASSWORD ?? null,
+            from: c.FOLD_MAIL_FROM as string,
+          },
+          publicUrl: (
+            c.FOLD_PUBLIC_URL ?? `https://{subdomain}.${c.FOLD_BASE_DOMAIN as string}`
+          ).replace(/\/+$/, ''),
+          signInRateLimit: c.FOLD_SIGNIN_RATE_LIMIT,
+        }
+      : null,
     logLevel: c.FOLD_LOG_LEVEL,
     kek,
   };
