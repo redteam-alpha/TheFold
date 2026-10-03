@@ -1,0 +1,22 @@
+{
+  "name": "@thefold/fold-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "description": "The Fold's Twenty app: church data model, roles, views and navigation, built on the MIT twenty-sdk.",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@thefold/core": "workspace:*",
+    "@thefold/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "twenty-sdk": "2.43.0"
+  }
+}

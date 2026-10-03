@@ -1,0 +1,211 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Local development / M0 stack: an UNMODIFIED, pinned Twenty plus the community database.
+# (ADR 0001: The Fold never patches Twenty. Twenty's own compose file is the reference for these settings.)
+#
+#   cp infra/.env.example infra/.env   # then fill in the two secrets
+#   docker compose -f infra/docker-compose.yml --env-file infra/.env up -d
+#
+# The member portal has no runtime entrypoint yet; it joins this file when it does.
+name: thefold
+
+services:
+  twenty-server:
+    image: twentycrm/twenty:${TWENTY_TAG:-v2.43.0}
+    ports:
+      - '${TWENTY_PORT:-3000}:3000'
+    volumes:
+      - twenty-local-data:/app/packages/twenty-server/.local-storage
+    environment:
+      NODE_PORT: 3000
+      PG_DATABASE_URL: postgres://postgres:${TWENTY_DB_PASSWORD:?set TWENTY_DB_PASSWORD}@twenty-db:5432/default
+      SERVER_URL: ${SERVER_URL:-http://localhost:3000}
+      REDIS_URL: redis://twenty-redis:6379
+      STORAGE_TYPE: local
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY (openssl rand -base64 32)}
+      # Deliberately NOT set: ENTERPRISE_KEY. The Fold must work without it (docs/enterprise-avoid.md).
+      # Deliberately NOT set: LOGIC_FUNCTION_TYPE / CODE_INTERPRETER_TYPE. They default to DISABLED in
+      # production and The Fold uses no logic functions (ADR 0001).
+      # IS_MULTIWORKSPACE_ENABLED=true is an M0 experiment (ADR 0002), not the default.
+      IS_MULTIWORKSPACE_ENABLED: ${IS_MULTIWORKSPACE_ENABLED:-false}
+      EMAIL_DRIVER: smtp
+      EMAIL_SMTP_HOST: mailpit
+      EMAIL_SMTP_PORT: 1025
+    depends_on:
+      twenty-db:
+        condition: service_healthy
+      twenty-redis:
+        condition: service_healthy
+    healthcheck:
+      test: curl --fail http://localhost:3000/healthz
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  twenty-worker:
+    image: twentycrm/twenty:${TWENTY_TAG:-v2.43.0}
+    command: ['yarn', 'worker:prod']
+    volumes:
+      - twenty-local-data:/app/packages/twenty-server/.local-storage
+    environment:
+      PG_DATABASE_URL: postgres://postgres:${TWENTY_DB_PASSWORD:?set TWENTY_DB_PASSWORD}@twenty-db:5432/default
+      SERVER_URL: ${SERVER_URL:-http://localhost:3000}
+      REDIS_URL: redis://twenty-redis:6379
+      DISABLE_DB_MIGRATIONS: 'true' # the server runs them
+      DISABLE_CRON_JOBS_REGISTRATION: 'true'
+      STORAGE_TYPE: local
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY (openssl rand -base64 32)}
+      # The worker, not the server, sends queued email (invitations, password resets), so it needs the same
+      # mail settings; without them it falls back to its default driver and nothing reaches Mailpit.
+      # Twenty's own compose file lists the EMAIL_* variables on the worker too.
+      EMAIL_DRIVER: smtp
+      EMAIL_SMTP_HOST: mailpit
+      EMAIL_SMTP_PORT: 1025
+      # The worker also sends webhooks, and Twenty refuses every private address unless its host is listed here
+      # (silently: the job is logged as processed and nothing is sent). Exactly one host, the community API's,
+      # by the alias below. Never `*`, and never OUTBOUND_HTTP_SAFE_MODE_ENABLED=false: either would let anyone
+      # who can create a webhook or a workflow point Twenty at every service on this network.
+      # Production does not need this: webhooks go to the community API's public HTTPS address.
+      OUTBOUND_HTTP_ALLOWED_INTERNAL_HOSTS: community-api.thefold.internal
+    depends_on:
+      twenty-server:
+        condition: service_healthy
+
+  twenty-db:
+    image: postgres:16
+    volumes:
+      - twenty-db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: default
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${TWENTY_DB_PASSWORD:?set TWENTY_DB_PASSWORD}
+    healthcheck:
+      test: pg_isready -U postgres -h localhost -d default
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  twenty-redis:
+    image: redis:7
+    command: ['--maxmemory-policy', 'noeviction'] # Twenty requires noeviction
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # The community service's own database (tenant-isolated with row-level security; see apps/community-api/db).
+  community-db:
+    image: postgres:16
+    ports:
+      - '${COMMUNITY_DB_PORT:-54330}:5432'
+    volumes:
+      - community-db-data:/var/lib/postgresql/data
+      - ../apps/community-api/db/roles.sql:/docker-entrypoint-initdb.d/00-roles.sql:ro
+    environment:
+      POSTGRES_DB: community
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${COMMUNITY_DB_PASSWORD:?set COMMUNITY_DB_PASSWORD}
+    healthcheck:
+      test: pg_isready -U postgres -h localhost -d community
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # The community service (apps/community-api): one image, three commands. `setup` runs once per `up`:
+  # it creates the database roles, applies migrations and provisions the church, idempotently. The API and
+  # the worker start only after it succeeds, and connect as `fold_app` (no ownership, no BYPASSRLS).
+  # Its secrets (FOLD_KEK, FOLD_APP_DB_PASSWORD, FOLD_MIGRATOR_DB_PASSWORD) have no defaults, but are not
+  # `:?`-required here, so an .env without them still runs Twenty: `community-setup` then stops with a
+  # message naming what is missing, and the API and worker do not start.
+  community-setup:
+    build: &community-build
+      context: ..
+      dockerfile: apps/community-api/Dockerfile
+    image: thefold/community-api:dev
+    command: ['setup']
+    environment:
+      # Parts, not URLs: the service builds the URLs and encodes the passwords (base64 ones contain '/' and '+').
+      FOLD_DB_HOST: community-db
+      FOLD_DB_NAME: community
+      FOLD_DB_SUPERUSER_PASSWORD: ${COMMUNITY_DB_PASSWORD:?set COMMUNITY_DB_PASSWORD}
+      FOLD_MIGRATOR_DB_PASSWORD: ${FOLD_MIGRATOR_DB_PASSWORD:-}
+      FOLD_APP_DB_PASSWORD: ${FOLD_APP_DB_PASSWORD:-}
+      FOLD_KEK: ${FOLD_KEK:-}
+      # The church. Leave FOLD_TENANT_SLUG empty to skip provisioning (e.g. before the Twenty key exists).
+      FOLD_TENANT_SLUG: ${FOLD_TENANT_SLUG:-}
+      FOLD_TENANT_NAME: ${FOLD_TENANT_NAME:-}
+      FOLD_TENANT_TIMEZONE: ${FOLD_TENANT_TIMEZONE:-UTC}
+      FOLD_TWENTY_BASE_URL: ${FOLD_TWENTY_BASE_URL:-http://twenty-server:3000}
+      FOLD_TWENTY_API_KEY: ${FOLD_TWENTY_API_KEY:-}
+      FOLD_TWENTY_WEBHOOK_SECRET: ${FOLD_TWENTY_WEBHOOK_SECRET:-}
+    depends_on:
+      community-db:
+        condition: service_healthy
+    restart: 'no'
+
+  community-api:
+    build: *community-build
+    image: thefold/community-api:dev
+    command: ['api']
+    ports:
+      - '${COMMUNITY_API_PORT:-4000}:4000'
+    networks:
+      default:
+        # The name Twenty's webhooks use. Twenty's webhook form refuses a host name without a dot, so the
+        # service name `community-api` cannot be entered there; `.internal` is reserved for private networks.
+        aliases: ['community-api.thefold.internal']
+    environment: &community-runtime
+      FOLD_DB_HOST: community-db
+      FOLD_DB_NAME: community
+      FOLD_APP_DB_PASSWORD: ${FOLD_APP_DB_PASSWORD:-}
+      FOLD_KEK: ${FOLD_KEK:-}
+      # A single-church install answers for this church on any host name (localhost, the VM's IP).
+      FOLD_DEFAULT_SUBDOMAIN: ${FOLD_TENANT_SLUG:-}
+      FOLD_BASE_DOMAIN: ${FOLD_BASE_DOMAIN:-}
+      FOLD_TURNSTILE_SECRET: ${FOLD_TURNSTILE_SECRET:-}
+      FOLD_LOG_LEVEL: ${FOLD_LOG_LEVEL:-info}
+      # Member email (sign-in links, ADR 0007). In development every message lands in Mailpit (port 8025).
+      FOLD_SMTP_HOST: ${FOLD_SMTP_HOST:-mailpit}
+      FOLD_SMTP_PORT: ${FOLD_SMTP_PORT:-1025}
+      FOLD_SMTP_SECURE: ${FOLD_SMTP_SECURE:-false}
+      FOLD_SMTP_USER: ${FOLD_SMTP_USER:-}
+      FOLD_SMTP_PASSWORD: ${FOLD_SMTP_PASSWORD:-}
+      FOLD_MAIL_FROM: '${FOLD_MAIL_FROM:-The Fold (development) <no-reply@thefold.localhost>}'
+      # The address members open, used in emailed links; plain http makes cookies non-Secure (development only).
+      FOLD_PUBLIC_URL: ${FOLD_PUBLIC_URL:-http://localhost:4000}
+    depends_on:
+      community-setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  community-worker:
+    build: *community-build
+    image: thefold/community-api:dev
+    command: ['worker']
+    environment: *community-runtime
+    depends_on:
+      community-setup:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Catches every email in development. Nothing ever leaves this machine.
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - '${MAILPIT_UI_PORT:-8025}:8025'
+
+volumes:
+  twenty-db-data:
+  twenty-local-data:
+  community-db-data:

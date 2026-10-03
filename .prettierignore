@@ -1,0 +1,8 @@
+node_modules
+pnpm-lock.yaml
+LICENSE
+coverage
+dist
+.twenty
+docs/research/*.raw.md
+*.md

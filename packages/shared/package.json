@@ -1,0 +1,19 @@
+{
+  "name": "@thefold/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "description": "Contracts shared by the Twenty app, the community API and the portal: zod schemas and the stable universalIdentifier registry.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@thefold/core": "workspace:*",
+    "zod": "^4.6.5"
+  }
+}

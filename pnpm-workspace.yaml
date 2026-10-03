@@ -1,0 +1,7 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# esbuild is pulled in by vite/vitest and needs its postinstall to fetch the native binary.
+onlyBuiltDependencies:
+  - esbuild

@@ -1,0 +1,30 @@
+{
+  "name": "@thefold/community-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "description": "The Fold community service: tenant-isolated Postgres, the Twenty sync pipeline, confidential care storage and automation workers.",
+  "scripts": {
+    "api": "tsx src/main.ts api",
+    "worker": "tsx src/main.ts worker",
+    "setup": "tsx src/main.ts setup",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.3",
+    "@thefold/core": "workspace:*",
+    "@thefold/shared": "workspace:*",
+    "@thefold/twenty-client": "workspace:*",
+    "hono": "^4.13.12",
+    "nodemailer": "^10.0.13",
+    "pg": "^8.23.0",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.23.1"
+  }
+}

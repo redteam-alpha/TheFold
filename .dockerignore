@@ -1,0 +1,9 @@
+**/node_modules
+**/.pgdata
+**/.twenty
+**/coverage
+**/test-results
+.git
+.tmp
+infra/.env
+**/*.log

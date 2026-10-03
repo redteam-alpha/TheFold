@@ -1,0 +1,43 @@
+# CLAUDE.md — working on The Fold
+
+The Fold is an AGPL-3.0 church CRM + community network built on **unmodified Twenty CRM** (ADR 0001).
+Read `README.md`, `docs/adr/`, `docs/privacy-and-safety.md` and `docs/verification-status.md` first.
+
+## Commands
+
+```sh
+pnpm install
+pnpm check                 # SPDX + licenses + lint + typecheck + tests (what CI runs)
+pnpm lint | pnpm typecheck | pnpm test
+eval "$(scripts/dev-pg.sh start)"   # ephemeral Postgres 16 for DB tests (sets FOLD_TEST_ADMIN_URL)
+FOLD_REQUIRE_DB=1 pnpm test         # make a missing database a failure instead of a skip
+pnpm m0                    # verify Twenty assumptions against a live instance (infra/README.md)
+```
+Shell state does not persist between tool calls: re-`eval` the dev-pg line in each command that needs the database.
+
+## Layout
+
+- `packages/core` — **dependency-free** domain rules (drift, welcomer, escalation, identity, prayer visibility,
+  digests). Relative imports only (enforced by ESLint). Dates are `YYYY-MM-DD` calendar days.
+- `packages/shared` — zod contracts and the `universalIdentifier` registry for the Twenty app.
+- `packages/twenty-client` — the only code that talks to Twenty's API (rate limit, batching, backoff, HMAC) and the M0 harness (`src/m0`).
+- `apps/community-api` — SQL migrations with row-level security, outbox/inbox, the intake → welcomer → follow-up flow (`src/intake`, `src/workers`), and the `TwentyGateway` port (`src/twenty`) that isolates every Twenty write.
+- `apps/fold-app` — the Twenty app. The model is plain data in `src/model/spec.ts`; entity files are one-liners the SDK discovers, and a test fails if they drift from the model.
+
+## Rules that are not negotiable
+
+1. **Never copy OSSN code** (CAL-1.0, incompatible with AGPL) and never use files marked
+   `@license Enterprise` from Twenty. Design from behaviour.
+2. **No prayer/care free text in Twenty.** It lives in community-api (ADR 0004).
+3. **Every source file starts with** `// SPDX-License-Identifier: AGPL-3.0-or-later` (`pnpm check:spdx`).
+4. **Every tenant table has `tenant_id` + row-level security.** A schema test fails otherwise.
+5. **No scores, rankings, leaderboards or peer-visible "who's missing".** See docs/privacy-and-safety.md.
+6. **Nothing automated pretends to be personal.** Drift creates a task for a human; it never messages the person.
+7. Never put real congregants' data in tests, fixtures or screenshots.
+8. Claims about Twenty stay **UNVERIFIED** in `docs/verification-status.md` until run against a real instance.
+
+## Style
+
+TypeScript strict, ESM, named exports, `type` imports (`verbatimModuleSyntax`), no `any`, small pure
+functions with property tests for anything that decides how a person is treated. Comment the *why*
+(especially safety/privacy reasoning), not the what.
