@@ -404,3 +404,16 @@ too, not only in the browser.
    **Welcome**. In Twenty the membership's status turns Active, with today's date in **Joined**.
 4. Back as B: the page now shows the member list (first name and last initial). Try **Leave this group**.
 5. A Secret group must not appear for anyone who is not in it, and its address must answer "Not found".
+
+**Confirming a shared family address.** When two adults share an email (or a record is marked as a shared address),
+signing in leaves the account unconfirmed until someone at the church says who it is:
+
+1. Give a fake adult the role, once, on the server (the id is the person's id in Twenty's address bar):
+
+   ```sh
+   docker compose -f infra/docker-compose.yml --env-file infra/.env exec community-api \
+     node --import tsx src/main.ts grant-role <slug> <twenty-person-id> welcome_lead
+   ```
+
+2. Sign in as that person: the home page shows **Confirm sign-ins**, with each waiting address and the adults it could
+   be. Choose one; that member can now see groups. Children are never offered.

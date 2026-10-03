@@ -65,9 +65,14 @@ portal will use.
 - Sign-in works only once the church's people are in `person_read`. They get there through the connection card's
   write-through, webhooks, or the hourly reconcile. Like every outbox job, sign-in email is sent only while the
   church's Twenty key is configured.
+- **Staff confirmation** (added with ADR 0008):
+  - A confirmed member holding `admin` or `welcome_lead` gets **Confirm sign-ins**: the accounts waiting, each
+    with the adults whose records use that address.
+  - Choosing one links the account (`VERIFIED`, `staff_confirmed`, `confirmed_by_person`) and writes the audit log.
+  - Children are never offered, nor anyone whose record does not carry the address.
+  - The first admin is granted on the server: `community-api grant-role <subdomain> <twenty-person-id> admin`
+    (and `revoke-role`). Admins are never self-appointed.
 - **Not built yet:**
-  - **staff confirmation** of `UNCONFIRMED` accounts. Until it exists, a shared-address household cannot use
-    member features. This is the next piece, together with groups.
-  - **passkeys** (the `passkey_credential` table exists).
+- **passkeys** (the `passkey_credential` table exists).
 - The per-IP limit is held in each API process's memory. With several API replicas, each enforces its own.
 - Production email needs a real relay, plus SPF and DKIM for the sending domain. That is not handled here.

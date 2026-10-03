@@ -7,6 +7,7 @@ import type { HtmlEscapedString } from 'hono/utils/html';
 import type { Pool } from 'pg';
 import { withTenant } from '../db/tenant.js';
 import type { Logger } from '../log.js';
+import { activeStaffRoles, canConfirmSignIns } from '../portal/confirm.js';
 import {
   SESSION_TTL_MS,
   memberForSession,
@@ -16,6 +17,7 @@ import {
   type Member,
 } from '../portal/signIn.js';
 import { mountGroupRoutes } from './groupRoutes.js';
+import { mountStaffRoutes } from './staffRoutes.js';
 import { WindowLimiter } from './rateLimit.js';
 
 export interface PortalOptions {
@@ -319,9 +321,18 @@ export function mountPortal(app: Hono, d: PortalDeps): void {
         html`<h1>${church}</h1>
           <p><a href="/sign-in">Sign in</a></p>`,
       );
+    const personId = m.person?.id;
+    const staffCanConfirm = personId
+      ? canConfirmSignIns(await withTenant(d.pool, tenantId, (x) => activeStaffRoles(x, personId)))
+      : false;
     const who = m.person
       ? html`<h1>Welcome, ${m.person.firstName || m.email}</h1>
-          <p><a href="/groups">Groups</a>: find one to join, or see yours.</p>`
+          <p><a href="/groups">Groups</a>: find one to join, or see yours.</p>
+          ${
+            staffCanConfirm
+              ? html`<p><a href="/staff/sign-ins">Confirm sign-ins</a> (for church staff)</p>`
+              : ''
+          }`
       : html`<h1>You're signed in</h1>
           <p>You're signed in as ${m.email}.</p>
           <p>
@@ -346,7 +357,9 @@ export function mountPortal(app: Hono, d: PortalDeps): void {
     return c.redirect('/sign-in', 303);
   });
 
-  mountGroupRoutes(app, { ...d, sameOrigin, churchName, member, page });
+  const kit = { ...d, sameOrigin, churchName, member, page };
+  mountGroupRoutes(app, kit);
+  mountStaffRoutes(app, kit);
 }
 
 export type PageStatus = 200 | 400 | 403 | 404 | 409 | 429 | 503;
@@ -473,6 +486,11 @@ const layout = (church: string, title: string, body: Body) =>
           form.inline button {
             margin: 0 0 0 0.5rem;
             padding: 0.35rem 0.7rem;
+          }
+          label.choice {
+            display: block;
+            font-weight: 400;
+            margin: 0.3rem 0;
           }
           .small {
             color: var(--muted);
