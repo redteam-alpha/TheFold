@@ -417,3 +417,15 @@ signing in leaves the account unconfirmed until someone at the church says who i
 
 2. Sign in as that person: the home page shows **Confirm sign-ins**, with each waiting address and the adults it could
    be. Choose one; that member can now see groups. Children are never offered.
+
+### 6.6 Group posts (ADR 0009; fake data only)
+
+Use the group from 6.5, with fake adult A as leader and B as an active member, plus a third fake adult C who is not in it.
+
+1. As B, open the group and follow **Posts**. Write something and press **Post**: it appears at the top.
+2. As A (second browser), open the post and press **Praying**. As B, the post now says "Only you see this: 1 Praying".
+   A sees no number.
+3. As A, reply. As B, **Report** the reply with a reason. As A, open **Reports**: the reply and the reason are there,
+   not B's name. Press **Remove it**: B now sees "This reply was removed."
+4. As C, open the post's address (copy it from B's browser): "Not found".
+5. As B, leave the group: the posts page answers "Not found" for B too.

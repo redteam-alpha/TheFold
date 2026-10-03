@@ -16,6 +16,7 @@ import {
   revokeSession,
   type Member,
 } from '../portal/signIn.js';
+import { mountFeedRoutes } from './feedRoutes.js';
 import { mountGroupRoutes } from './groupRoutes.js';
 import { mountStaffRoutes } from './staffRoutes.js';
 import { WindowLimiter } from './rateLimit.js';
@@ -359,6 +360,7 @@ export function mountPortal(app: Hono, d: PortalDeps): void {
 
   const kit = { ...d, sameOrigin, churchName, member, page };
   mountGroupRoutes(app, kit);
+  mountFeedRoutes(app, kit);
   mountStaffRoutes(app, kit);
 }
 
@@ -433,7 +435,8 @@ const layout = (church: string, title: string, body: Body) =>
             font-weight: 600;
             margin-bottom: 0.35rem;
           }
-          input[type='email'] {
+          input[type='email'],
+          input:not([type]) {
             box-sizing: border-box;
             width: 100%;
             padding: 0.7rem;
@@ -491,6 +494,32 @@ const layout = (church: string, title: string, body: Body) =>
             display: block;
             font-weight: 400;
             margin: 0.3rem 0;
+          }
+          textarea {
+            box-sizing: border-box;
+            width: 100%;
+            padding: 0.7rem;
+            font: inherit;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: transparent;
+            color: inherit;
+          }
+          article.post {
+            padding: 0.9rem 0;
+            border-bottom: 1px solid var(--line);
+          }
+          p.text {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+          }
+          form.reactions button {
+            margin-right: 0.4rem;
+          }
+          details.report summary {
+            color: var(--muted);
+            font-size: 0.9rem;
+            cursor: pointer;
           }
           .small {
             color: var(--muted);

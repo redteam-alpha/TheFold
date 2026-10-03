@@ -2,7 +2,6 @@
 import type { Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { html } from 'hono/html';
-import { withTenant } from '../db/tenant.js';
 import {
   decideRequest,
   groupDetail,
@@ -13,14 +12,10 @@ import {
   type GroupDetail,
   type GroupView,
 } from '../portal/groups.js';
-import type { Member } from '../portal/signIn.js';
+import { memberGate, type Gate } from './memberGate.js';
 import type { PortalKit } from './portal.js';
 
 const SMALL_BODY = bodyLimit({ maxSize: 8 * 1024 });
-
-type Gate =
-  | { ok: true; tenantId: string; church: string; personId: string; member: Member }
-  | { ok: false; reason: 'UNKNOWN_CHURCH' | 'SIGNED_OUT' | 'UNCONFIRMED'; church: string };
 
 const STATUS_TEXT: Record<string, string> = {
   INTERESTED: 'Invited',
@@ -35,42 +30,7 @@ const STATUS_TEXT: Record<string, string> = {
  * not yet confirmed sees nothing about anyone. Every write is a form post or JSON request from this host.
  */
 export function mountGroupRoutes(app: Hono, k: PortalKit): void {
-  const gate = async (c: Context): Promise<Gate> => {
-    const tenantId = await k.tenantOf(c);
-    if (!tenantId) return { ok: false, reason: 'UNKNOWN_CHURCH', church: '' };
-    const church = await k.churchName(tenantId);
-    const member = await k.member(c, tenantId);
-    if (!member) return { ok: false, reason: 'SIGNED_OUT', church };
-    if (!member.person) return { ok: false, reason: 'UNCONFIRMED', church };
-    return { ok: true, tenantId, church, personId: member.person.id, member };
-  };
-
-  const inTenant = <T>(tenantId: string, fn: Parameters<typeof withTenant<T>>[2]) =>
-    withTenant(k.pool, tenantId, fn);
-
-  const jsonRefusal = (c: Context, g: Exclude<Gate, { ok: true }>) =>
-    g.reason === 'UNKNOWN_CHURCH'
-      ? c.json({ error: 'unknown church' }, 404)
-      : g.reason === 'SIGNED_OUT'
-        ? c.json({ error: 'not signed in' }, 401)
-        : c.json({ error: 'your church has not confirmed your account yet' }, 403);
-
-  const pageRefusal = (c: Context, g: Exclude<Gate, { ok: true }>) => {
-    if (g.reason === 'UNKNOWN_CHURCH') return c.json({ error: 'unknown church' }, 404);
-    if (g.reason === 'SIGNED_OUT') return c.redirect('/sign-in', 303);
-    return k.page(
-      c,
-      g.church,
-      'Groups',
-      html`<h1>Groups</h1>
-        <p>
-          Before you can see groups, someone at ${g.church} needs to confirm which person in the
-          church's records you are. Please ask at the welcome desk.
-        </p>
-        <p><a href="/">Back</a></p>`,
-      403,
-    );
-  };
+  const { gate, inTenant, jsonRefusal, pageRefusal } = memberGate(k);
 
   const actionStatus = (r: GroupAction) =>
     r.ok ? 202 : r.reason === 'NOT_FOUND' ? 404 : (409 as const);
@@ -174,6 +134,14 @@ export function mountGroupRoutes(app: Hono, k: PortalKit): void {
       ${d.childFriendly ? html`<p class="small">Children welcome.</p>` : ''}
       ${d.leaders.length > 0 ? html`<p class="small">Led by ${d.leaders.join(', ')}.</p>` : ''}
       ${d.myStatus && STATUS_TEXT[d.myStatus] ? html`<p><strong>${STATUS_TEXT[d.myStatus]}.</strong></p>` : ''}
+      ${
+        d.members
+          ? html`<p>
+              <a href="/groups/${d.id}/posts">Posts</a>: keep talking between meetings.
+              ${d.leads ? html` · <a href="/groups/${d.id}/reports">Reports</a>` : ''}
+            </p>`
+          : ''
+      }
       ${
         d.canRequestToJoin
           ? html`<form method="post" action="/groups/${d.id}/join">

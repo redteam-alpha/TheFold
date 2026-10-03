@@ -7,6 +7,7 @@ import {
   canSeeMembers,
   shortName,
   visibleMembers,
+  type GroupFacts,
   type GroupOpenness,
   type GroupRole,
   type MembershipStatus,
@@ -60,7 +61,7 @@ export interface GroupView {
  * a member who just asked to join sees "Requested" at once. Several rows for one pair (a duplicate made in
  * Twenty) resolve to the newest.
  */
-async function ownMemberships(
+export async function ownMemberships(
   c: PoolClient,
   personId: string,
   groupId: string | null,
@@ -82,6 +83,30 @@ async function ownMemberships(
     [personId, groupId],
   );
   return new Map(rows.map((r) => [r.group_id, { role: r.role, status: r.status }]));
+}
+
+/**
+ * A group's facts and the person's own membership of it, for the rules in `@thefold/core`. Null when the group
+ * is unknown in this church.
+ */
+export async function groupAccess(
+  c: PoolClient,
+  personId: string,
+  groupId: string,
+): Promise<{ name: string; facts: GroupFacts; own: OwnMembership } | null> {
+  if (!isGroupId(groupId)) return null;
+  const g = (
+    await c.query<{ name: string; openness: GroupOpenness; deleted_at: Date | null }>(
+      `SELECT name, openness, deleted_at FROM group_read WHERE twenty_group_id = $1`,
+      [groupId],
+    )
+  ).rows[0];
+  if (!g) return null;
+  return {
+    name: g.name,
+    facts: { openness: g.openness, deleted: g.deleted_at !== null },
+    own: (await ownMemberships(c, personId, groupId)).get(groupId) ?? null,
+  };
 }
 
 const groupColumns = `twenty_group_id, name, group_type, openness, child_friendly, paused_until::text AS paused_until,
