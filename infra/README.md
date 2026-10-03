@@ -392,3 +392,15 @@ Members sign in with a link emailed to them; in development every message lands 
 
 `GET /v1/me` with the session cookie answers `{email, link, person}` as JSON. **Sign out** ends the session on the server
 too, not only in the browser.
+
+### 6.5 Groups (ADR 0008; fake data only)
+
+1. In Twenty, create a group (Groups → New) with **Who can find it** = Closed, and a membership for fake adult A with
+   **Role** = Leader and **Status** = Active. Within a minute or so (a webhook, or at most the hourly reconcile) it is
+   in the community database.
+2. Sign in as fake adult B (6.4) and open `<FOLD_PUBLIC_URL>/groups`: the group is listed with A's first name as
+   leader. Press **Ask to join**; the page says "You asked to join" straight away.
+3. In a second browser (or a private window), sign in as A, open the group: B is under **Asking to join**. Press
+   **Welcome**. In Twenty the membership's status turns Active, with today's date in **Joined**.
+4. Back as B: the page now shows the member list (first name and last initial). Try **Leave this group**.
+5. A Secret group must not appear for anyone who is not in it, and its address must answer "Not found".

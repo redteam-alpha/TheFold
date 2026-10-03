@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { TwentyRecord } from '@thefold/twenty-client';
 import type { PoolClient } from 'pg';
-import { upsertMembershipRead, upsertPersonRead } from '../db/readModels.js';
-import { membershipReadFromTwenty, personReadFromTwenty } from './fromTwenty.js';
+import { upsertGroupRead, upsertMembershipRead, upsertPersonRead } from '../db/readModels.js';
+import {
+  groupReadFromTwenty,
+  membershipReadFromTwenty,
+  personReadFromTwenty,
+} from './fromTwenty.js';
 
 export type ApplyOutcome = 'APPLIED' | 'STALE' | 'SKIPPED';
 
@@ -30,6 +34,20 @@ export const SYNCED_OBJECTS: Readonly<Record<string, SyncedObject>> = {
     async markGone(client, id) {
       const { rowCount } = await client.query(
         `UPDATE person_read SET deleted_at = now(), synced_at = now() WHERE twenty_person_id = $1 AND deleted_at IS NULL`,
+        [id],
+      );
+      return (rowCount ?? 0) > 0;
+    },
+  },
+  churchGroup: {
+    plural: 'churchGroups',
+    async apply(client, record) {
+      const row = groupReadFromTwenty(record);
+      return row ? upsertGroupRead(client, row) : 'SKIPPED';
+    },
+    async markGone(client, id) {
+      const { rowCount } = await client.query(
+        `UPDATE group_read SET deleted_at = now(), synced_at = now() WHERE twenty_group_id = $1 AND deleted_at IS NULL`,
         [id],
       );
       return (rowCount ?? 0) > 0;

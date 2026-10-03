@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { toLocalDate } from '@thefold/core';
 import type { Pool, PoolClient } from 'pg';
-import { upsertPersonRead } from '../db/readModels.js';
+import { upsertPersonRead, writeThroughMembership } from '../db/readModels.js';
 import { assignWelcome } from '../intake/assignment.js';
 import { claimOutbox, completeOutbox, failOutbox, type ClaimedJob } from '../db/outbox.js';
 import { withTenant } from '../db/tenant.js';
@@ -102,6 +102,30 @@ async function runJob(
     case 'twenty.createCareRequest': {
       await gateway.createCareRequest(claimed.idempotencyKey, job.careRequest, now.getTime());
       break;
+    }
+    case 'twenty.upsertMembership': {
+      const m = job.membership;
+      const tz = await withTenant(
+        pool,
+        tenantId,
+        async (c) =>
+          (await c.query<{ timezone: string }>('SELECT timezone FROM tenant')).rows[0]?.timezone ??
+          'UTC',
+      );
+      const r = await gateway.upsertMembership(m, toLocalDate(now.getTime(), tz));
+      // Written straight through, so the member and the leader see the change before Twenty's webhook.
+      await withTenant(pool, tenantId, async (c) => {
+        await writeThroughMembership(c, {
+          twentyMembershipId: r.id,
+          twentyUpdatedAt: r.updatedAt ? new Date(r.updatedAt) : null,
+          groupId: m.groupId,
+          personId: m.personId,
+          role: m.role,
+          status: m.status,
+        });
+        await completeOutbox(c, claimed.id);
+      });
+      return;
     }
     case 'twenty.recordAttendance': {
       await gateway.recordAttendance(claimed.idempotencyKey, job.attendance);

@@ -215,4 +215,41 @@ describe('RestTwentyGateway (against the fake Twenty; shapes are UNVERIFIED unti
       personId: att.personId,
     });
   });
+
+  it('keeps one membership per person per group: creates it, then updates it, never a second one', async () => {
+    const { server, gateway } = setup();
+    const m = {
+      groupId: '00000000-0000-4000-8000-0000000000e1',
+      personId: '00000000-0000-4000-8000-0000000000e2',
+      role: 'MEMBER' as const,
+    };
+    const asked = await gateway.upsertMembership({ ...m, status: 'REQUESTED' }, '2026-10-02');
+    expect(asked.created).toBe(true);
+    expect(asked.updatedAt).toEqual(expect.any(String));
+    const lookup = server.calls.find(
+      (call) => call.method === 'GET' && call.path === '/rest/groupMemberships',
+    );
+    expect(lookup?.query['filter']).toBe(
+      `and(groupId[eq]:"${m.groupId}",personId[eq]:"${m.personId}")`,
+    );
+
+    const approved = await gateway.upsertMembership({ ...m, status: 'ACTIVE' }, '2026-10-03');
+    expect(approved).toMatchObject({ id: asked.id, created: false });
+    expect(server.rows('groupMemberships')).toHaveLength(1);
+    expect(server.rows('groupMemberships')[0]).toMatchObject({
+      groupId: m.groupId,
+      personId: m.personId,
+      groupRole: 'MEMBER',
+      status: 'ACTIVE',
+      joinedAt: '2026-10-03',
+    });
+    expect(server.rows('groupMemberships')[0]).not.toHaveProperty('role');
+
+    // Leaving keeps the date they joined.
+    await gateway.upsertMembership({ ...m, status: 'LEFT' }, '2026-11-01');
+    expect(server.rows('groupMemberships')[0]).toMatchObject({
+      status: 'LEFT',
+      joinedAt: '2026-10-03',
+    });
+  });
 });

@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { GROUP_ROLES, LIFECYCLE_STAGES, MEMBERSHIP_STATUSES } from '@thefold/core';
+import {
+  GROUP_OPENNESS,
+  GROUP_ROLES,
+  GROUP_TYPES,
+  LIFECYCLE_STAGES,
+  MEMBERSHIP_STATUSES,
+} from '@thefold/core';
 import type { TwentyRecord } from '@thefold/twenty-client';
-import type { MembershipReadInput, PersonReadInput } from '../db/readModels.js';
+import type { GroupReadInput, MembershipReadInput, PersonReadInput } from '../db/readModels.js';
 
 /**
  * Twenty records → read-model rows. Shapes: composite `name`/`emails`/`phones` and `<relation>Id` were seen on
@@ -91,6 +97,35 @@ export function membershipReadFromTwenty(r: TwentyRecord): MembershipReadInput |
     personId,
     role,
     status,
+    deletedAt: date(r['deletedAt']),
+  };
+}
+
+/**
+ * An unknown openness maps to null (skipped, not guessed): reading it as PUBLIC could show a secret group to the
+ * whole church. A missing one is CLOSED, Twenty's default for the field.
+ */
+export function groupReadFromTwenty(r: TwentyRecord): GroupReadInput | null {
+  const updatedAt = date(r['updatedAt']);
+  const openness = oneOf(GROUP_OPENNESS, r['openness'], 'CLOSED');
+  if (!updatedAt || !openness) return null;
+  const groupType = str(r['groupType']);
+  const paused = str(r['pausedUntil']);
+  const capacity = r['capacity'];
+  return {
+    twentyGroupId: r.id,
+    twentyUpdatedAt: updatedAt,
+    name: str(r['name']) ?? '',
+    groupType:
+      groupType && (GROUP_TYPES as readonly string[]).includes(groupType) ? groupType : null,
+    openness,
+    childFriendly: bool(r['childFriendly']),
+    pausedUntil: paused ? paused.slice(0, 10) : null,
+    campusId: str(r['campusId']),
+    description: str(r['description']),
+    schedule: str(r['schedule']),
+    capacity:
+      typeof capacity === 'number' && Number.isInteger(capacity) && capacity >= 0 ? capacity : null,
     deletedAt: date(r['deletedAt']),
   };
 }

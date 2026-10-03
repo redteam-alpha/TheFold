@@ -31,6 +31,7 @@ export interface GuestUpsertResult {
 type FollowUpJob = Extract<OutboxJobInput, { kind: 'twenty.createFollowUp' }>;
 type CareRequestJob = Extract<OutboxJobInput, { kind: 'twenty.createCareRequest' }>;
 type AttendanceJob = Extract<OutboxJobInput, { kind: 'twenty.recordAttendance' }>;
+type MembershipJob = Extract<OutboxJobInput, { kind: 'twenty.upsertMembership' }>;
 
 export interface TwentyGateway {
   upsertGuest(input: GuestUpsertInput): Promise<GuestUpsertResult>;
@@ -47,6 +48,11 @@ export interface TwentyGateway {
     sourceRef: string,
     attendance: AttendanceJob['attendance'],
   ): Promise<{ id: string; created: boolean }>;
+  /** Creates or updates THE membership of a person in a group. `updatedAt` is Twenty's, when it says. */
+  upsertMembership(
+    membership: MembershipJob['membership'],
+    today: string,
+  ): Promise<{ id: string; created: boolean; updatedAt: string | null }>;
 }
 
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -157,4 +163,33 @@ export class RestTwentyGateway implements TwentyGateway {
     });
     return { id: record.id, created };
   }
+
+  async upsertMembership(m: MembershipJob['membership'], today: string) {
+    const fields = {
+      status: m.status,
+      groupRole: m.role,
+    };
+    // Looked up by the pair every time, so a create whose response was lost is found and updated on retry.
+    const existing = await this.client.findOneByIds('groupMemberships', {
+      groupId: m.groupId,
+      personId: m.personId,
+    });
+    if (existing) {
+      const updated = await this.client.updateRecord('groupMemberships', existing.id, {
+        ...fields,
+        ...(m.status === 'ACTIVE' && !existing['joinedAt'] ? { joinedAt: today } : {}),
+      });
+      return { id: updated.id, created: false, updatedAt: stringOrNull(updated['updatedAt']) };
+    }
+    const created = await this.client.createRecord('groupMemberships', {
+      name: 'From the member portal',
+      groupId: m.groupId,
+      personId: m.personId,
+      ...fields,
+      ...(m.status === 'ACTIVE' ? { joinedAt: today } : {}),
+    });
+    return { id: created.id, created: true, updatedAt: stringOrNull(created['updatedAt']) };
+  }
 }
+
+const stringOrNull = (v: unknown): string | null => (typeof v === 'string' ? v : null);

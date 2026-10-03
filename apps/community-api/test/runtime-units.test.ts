@@ -8,7 +8,11 @@ import { subdomainFromHost } from '../src/http/tenantResolution.js';
 import { verifyTurnstile } from '../src/http/turnstile.js';
 import { hintFromTwentyWebhook } from '../src/http/webhookPayload.js';
 import { createLogger } from '../src/log.js';
-import { membershipReadFromTwenty, personReadFromTwenty } from '../src/sync/fromTwenty.js';
+import {
+  groupReadFromTwenty,
+  membershipReadFromTwenty,
+  personReadFromTwenty,
+} from '../src/sync/fromTwenty.js';
 
 const KEK = Buffer.alloc(32, 7).toString('base64');
 const TENANT = '00000000-0000-4000-8000-000000000001';
@@ -366,6 +370,34 @@ describe('Twenty records → read models', () => {
     expect(membershipReadFromTwenty({ ...m, groupRole: undefined })?.role).toBe('MEMBER');
     expect(membershipReadFromTwenty({ ...m, personId: null })).toBeNull();
     expect(membershipReadFromTwenty({ ...m, status: 'BANNED' })).toBeNull();
+  });
+
+  it('maps a group, and skips one whose openness it does not know rather than showing it to everyone', () => {
+    const g = {
+      id: PERSON,
+      updatedAt: '2026-10-02T09:00:00.000Z',
+      name: 'Tuesday Supper',
+      groupType: 'SMALL_GROUP',
+      openness: 'SECRET',
+      schedule: 'Tuesdays 7pm',
+      capacity: 12,
+      childFriendly: true,
+      pausedUntil: '2026-12-01T00:00:00.000Z',
+      description: 'Food and conversation',
+    };
+    expect(groupReadFromTwenty(g)).toMatchObject({
+      name: 'Tuesday Supper',
+      openness: 'SECRET',
+      schedule: 'Tuesdays 7pm',
+      capacity: 12,
+      childFriendly: true,
+      pausedUntil: '2026-12-01',
+      description: 'Food and conversation',
+    });
+    expect(groupReadFromTwenty({ ...g, openness: undefined })?.openness).toBe('CLOSED');
+    expect(groupReadFromTwenty({ ...g, openness: 'INVITE_ONLY' })).toBeNull();
+    expect(groupReadFromTwenty({ ...g, capacity: -1 })?.capacity).toBeNull();
+    expect(groupReadFromTwenty({ ...g, groupType: 'NEW_KIND' })?.groupType).toBeNull();
   });
 });
 

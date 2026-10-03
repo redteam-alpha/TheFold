@@ -157,6 +157,33 @@ export class TwentyClient {
   }
 
   /**
+   * The one live record whose relation ids all match, e.g. a person's membership of a group:
+   * `filter=and(groupId[eq]:"…",personId[eq]:"…")`. UNVERIFIED: the `and(...)` syntax on a real Twenty. Values
+   * must be record ids, so nothing a member typed ever reaches the filter.
+   */
+  async findOneByIds(
+    plural: string,
+    ids: Readonly<Record<string, string>>,
+    priority?: Priority,
+  ): Promise<TwentyRecord | null> {
+    assertPlural(plural);
+    const parts = Object.entries(ids).map(([field, id]) => {
+      if (!/^[A-Za-z][A-Za-z0-9]*$/.test(field) || !RECORD_ID.test(id))
+        throw new TypeError('findOneByIds takes field names and record ids');
+      return `${field}[eq]:"${id}"`;
+    });
+    if (parts.length === 0) throw new TypeError('findOneByIds needs at least one id');
+    const json = await this.request('GET', `/rest/${plural}`, {
+      query: {
+        filter: parts.length === 1 ? (parts[0] as string) : `and(${parts.join(',')})`,
+        limit: 1,
+      },
+      priority,
+    });
+    return unwrapRecords(json)[0] ?? null;
+  }
+
+  /**
    * `GET /rest/<plural>/<id>`. Null when the record does not exist (404), including after it was deleted, so a
    * webhook refetch can tell "gone" from "failed".
    */

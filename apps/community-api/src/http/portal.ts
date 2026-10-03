@@ -15,6 +15,7 @@ import {
   revokeSession,
   type Member,
 } from '../portal/signIn.js';
+import { mountGroupRoutes } from './groupRoutes.js';
 import { WindowLimiter } from './rateLimit.js';
 
 export interface PortalOptions {
@@ -24,7 +25,7 @@ export interface PortalOptions {
   signInRateLimit: number;
 }
 
-interface PortalDeps {
+export interface PortalDeps {
   pool: Pool;
   log: Logger;
   now: () => Date;
@@ -187,7 +188,7 @@ export function mountPortal(app: Hono, d: PortalDeps): void {
     church: string,
     title: string,
     body: Body,
-    status: 200 | 400 | 403 | 429 | 503 = 200,
+    status: PageStatus = 200,
   ) => {
     c.header('Cache-Control', 'no-store');
     return c.html(layout(church, title, body), status);
@@ -320,7 +321,7 @@ export function mountPortal(app: Hono, d: PortalDeps): void {
       );
     const who = m.person
       ? html`<h1>Welcome, ${m.person.firstName || m.email}</h1>
-          <p>You're signed in. Groups and the community page are on their way.</p>`
+          <p><a href="/groups">Groups</a>: find one to join, or see yours.</p>`
       : html`<h1>You're signed in</h1>
           <p>You're signed in as ${m.email}.</p>
           <p>
@@ -344,9 +345,27 @@ export function mountPortal(app: Hono, d: PortalDeps): void {
     if (sameOrigin(c)) await endSession(c, tenantId);
     return c.redirect('/sign-in', 303);
   });
+
+  mountGroupRoutes(app, { ...d, sameOrigin, churchName, member, page });
 }
 
-type Body = HtmlEscapedString | Promise<HtmlEscapedString>;
+export type PageStatus = 200 | 400 | 403 | 404 | 409 | 429 | 503;
+
+/** What the member-facing routes share: the church, the signed-in member, the same-origin check, the page. */
+export interface PortalKit extends PortalDeps {
+  sameOrigin: (c: Context) => boolean;
+  churchName: (tenantId: string) => Promise<string>;
+  member: (c: Context, tenantId: string) => Promise<Member | null>;
+  page: (
+    c: Context,
+    church: string,
+    title: string,
+    body: Body,
+    status?: PageStatus,
+  ) => Response | Promise<Response>;
+}
+
+export type Body = HtmlEscapedString | Promise<HtmlEscapedString>;
 
 const layout = (church: string, title: string, body: Body) =>
   html`<!doctype html>
@@ -434,6 +453,26 @@ const layout = (church: string, title: string, body: Body) =>
             padding: 0.7rem;
             border-left: 3px solid var(--accent);
             background: color-mix(in srgb, var(--accent) 10%, transparent);
+          }
+          h2 {
+            font-size: 1.15rem;
+            margin: 1.75rem 0 0.5rem;
+          }
+          ul.list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+          }
+          ul.list li {
+            padding: 0.6rem 0;
+            border-bottom: 1px solid var(--line);
+          }
+          form.inline {
+            display: inline;
+          }
+          form.inline button {
+            margin: 0 0 0 0.5rem;
+            padding: 0.35rem 0.7rem;
           }
           .small {
             color: var(--muted);

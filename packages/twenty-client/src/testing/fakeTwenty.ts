@@ -368,6 +368,14 @@ export class FakeTwenty {
       const eq = /^([A-Za-z]+)\[eq\]:"(.*)"$/.exec(filter);
       if (eq && eq[1] !== 'sourceRef')
         rows = rows.filter((r) => String(r[eq[1] as string]) === eq[2]);
+      const all = /^and\((.*)\)$/.exec(filter);
+      if (all)
+        for (const part of (all[1] ?? '').split(',')) {
+          const m = /^([A-Za-z]+)\[eq\]:"(.*)"$/.exec(part);
+          if (!m)
+            return this.json({ statusCode: 400, messages: ["'filter' parameter invalid"] }, 400);
+          rows = rows.filter((r) => String(r[m[1] as string]) === m[2]);
+        }
       // Timeline entries about care requests are hidden from staff, unless this server leaks them.
       if (
         many[1] === 'timelineActivities' &&

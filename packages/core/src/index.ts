@@ -11,3 +11,4 @@ export * from './followups/schedule.js';
 export * from './identity/match.js';
 export * from './care/canViewPrayer.js';
 export * from './notifications/digest.js';
+export * from './groups/access.js';

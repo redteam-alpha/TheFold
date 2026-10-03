@@ -207,11 +207,49 @@ describe.skipIf(!dbAvailable)('worker', () => {
       c.query<{ object_type: string }>(`SELECT object_type FROM sync_cursor ORDER BY object_type`),
     );
     expect(cursors.rows.map((r) => r.object_type)).toEqual([
+      'churchGroup',
+      'churchGroup:deleted',
       'groupMembership',
       'groupMembership:deleted',
       'person',
       'person:deleted',
     ]);
+  });
+
+  it('copies groups from Twenty, and marks one deleted there as gone', async () => {
+    const client = fastClient(server);
+    const g = await client.createRecord('churchGroups', {
+      name: 'Tuesday Supper',
+      openness: 'SECRET',
+      schedule: 'Tuesdays 7pm',
+      capacity: 10,
+    });
+    const r = await worker().tickTenant(t.id);
+    expect(r.reconciled['churchGroup']).toBe(1);
+    const groups = () =>
+      inT((c) =>
+        c.query<{
+          name: string;
+          openness: string;
+          schedule: string;
+          capacity: number;
+          deleted_at: Date | null;
+        }>(`SELECT name, openness, schedule, capacity, deleted_at FROM group_read`),
+      ).then((x) => x.rows);
+    expect(await groups()).toEqual([
+      {
+        name: 'Tuesday Supper',
+        openness: 'SECRET',
+        schedule: 'Tuesdays 7pm',
+        capacity: 10,
+        deleted_at: null,
+      },
+    ]);
+
+    await client.deleteRecord('churchGroups', g.id);
+    await inT((c) => c.query(`UPDATE sync_cursor SET last_run_at = now() - interval '2 hours'`));
+    expect((await worker().tickTenant(t.id)).reconciled['churchGroup:deleted']).toBe(1);
+    expect((await groups())[0]?.deleted_at).toBeInstanceOf(Date);
   });
 
   it('reads many deletions in capped slices, like changes', async () => {

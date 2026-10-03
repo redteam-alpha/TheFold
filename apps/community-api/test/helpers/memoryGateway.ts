@@ -6,7 +6,9 @@ import type {
   TwentyGateway,
 } from '../../src/twenty/gateway.js';
 
-type Method = 'upsertGuest' | 'createFollowUp' | 'createCareRequest' | 'recordAttendance';
+type Method =
+  'upsertGuest' | 'createFollowUp' | 'createCareRequest' | 'recordAttendance' | 'upsertMembership';
+type Membership = Parameters<TwentyGateway['upsertMembership']>[0];
 type FollowUp = Parameters<TwentyGateway['createFollowUp']>[1];
 
 const uuid = (ref: string) => deterministicUuid(`memory:${ref}`, FOLD_ID_NAMESPACE);
@@ -20,6 +22,11 @@ export class MemoryGateway implements TwentyGateway {
   readonly followUps = new Map<string, { id: string; followUp: FollowUp }>();
   readonly attendances = new Map<string, unknown>();
   readonly careRequests = new Map<string, unknown>();
+  /** One membership per `<groupId>:<personId>`, as in Twenty. */
+  readonly memberships = new Map<
+    string,
+    { id: string; membership: Membership; joinedAt: string | null }
+  >();
   readonly calls: Method[] = [];
   /** How many more calls to `method` should fail before applying. */
   private failBefore: Partial<Record<Method, number>> = {};
@@ -105,5 +112,19 @@ export class MemoryGateway implements TwentyGateway {
 
   followUpsOfKind(kind: string): FollowUp[] {
     return [...this.followUps.values()].map((f) => f.followUp).filter((f) => f.kind === kind);
+  }
+
+  upsertMembership(membership: Membership, today: string) {
+    const g = this.gate('upsertMembership');
+    const key = `${membership.groupId}:${membership.personId}`;
+    const existing = this.memberships.get(key);
+    const id = existing?.id ?? uuid(`membership:${key}`);
+    this.memberships.set(key, {
+      id,
+      membership,
+      joinedAt: existing?.joinedAt ?? (membership.status === 'ACTIVE' ? today : null),
+    });
+    g.after();
+    return Promise.resolve({ id, created: !existing, updatedAt: null });
   }
 }

@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { FOLLOW_UP_KINDS, PRAYER_TIERS, toEpochDay } from '@thefold/core';
+import {
+  FOLLOW_UP_KINDS,
+  GROUP_ROLES,
+  MEMBERSHIP_STATUSES,
+  PRAYER_TIERS,
+  toEpochDay,
+} from '@thefold/core';
 import { z } from 'zod';
 
 /** A calendar day, `YYYY-MM-DD`, validated as a real date. */
@@ -176,6 +182,17 @@ export const outboxJobSchema = z.discriminatedUnion('kind', [
       category: z.enum(['VISIT', 'MEAL', 'PRAYER', 'PRACTICAL_HELP', 'CHECK_IN', 'OTHER']),
       /** Opaque pointer to the confidential record in community-api. Not the text. */
       communityRef: z.uuid(),
+    }),
+  }),
+  z.object({
+    kind: z.literal('twenty.upsertMembership'),
+    idempotencyKey: z.string().min(1).max(200),
+    /** One membership per person per group: found by the pair, then created or updated (no sourceRef). */
+    membership: z.object({
+      groupId: z.uuid(),
+      personId: z.uuid(),
+      status: z.enum(MEMBERSHIP_STATUSES),
+      role: z.enum(GROUP_ROLES),
     }),
   }),
   z.object({
